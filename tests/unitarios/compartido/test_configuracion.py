@@ -15,6 +15,7 @@ def entorno_vacio(monkeypatch: pytest.MonkeyPatch) -> None:
     monkeypatch.delenv("MINUTAS_URL_BASE_DE_DATOS", raising=False)
     monkeypatch.delenv("MINUTAS_URL_BASE_DE_DATOS_MIGRACIONES", raising=False)
     monkeypatch.delenv("MINUTAS_NIVEL_DE_REGISTRO", raising=False)
+    monkeypatch.delenv("MINUTAS_ENTORNO", raising=False)
 
 
 def test_configuracion_lee_variables_con_prefijo_minutas(monkeypatch: pytest.MonkeyPatch) -> None:
