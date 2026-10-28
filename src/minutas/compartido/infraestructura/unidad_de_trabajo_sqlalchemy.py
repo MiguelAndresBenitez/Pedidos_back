@@ -40,8 +40,10 @@ class UnidadDeTrabajoSQLAlchemy:
         error: BaseException | None,
         traza: TracebackType | None,
     ) -> None:
-        await self._sesion.rollback()
-        await self._sesion.close()
+        try:
+            await self._sesion.rollback()
+        finally:
+            await self._sesion.close()
 
     async def confirmar(self) -> None:
         await self._sesion.commit()
