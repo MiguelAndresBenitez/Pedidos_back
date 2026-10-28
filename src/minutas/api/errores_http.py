@@ -1,5 +1,6 @@
 """Traducción de errores a respuestas application/problem+json (RFC 9457)."""
 
+from collections.abc import Mapping
 from http import HTTPStatus
 from typing import Any, cast
 
@@ -44,7 +45,13 @@ def obtener_estado_por_error(error: ErrorDeDominio) -> HTTPStatus:
     )
 
 
-def crear_problema(estado: HTTPStatus, codigo: str, detalle: str, **extras: Any) -> JSONResponse:
+def crear_problema(
+    estado: HTTPStatus,
+    codigo: str,
+    detalle: str,
+    cabeceras: Mapping[str, str] | None = None,
+    **extras: Any,
+) -> JSONResponse:
     contenido = {
         "type": "about:blank",
         "title": estado.phrase,
@@ -54,7 +61,9 @@ def crear_problema(estado: HTTPStatus, codigo: str, detalle: str, **extras: Any)
         "request_id": obtener_contexto().get("request_id"),
         **extras,
     }
-    return JSONResponse(status_code=estado, content=contenido, media_type=TIPO_DE_MEDIO)
+    return JSONResponse(
+        status_code=estado, content=contenido, media_type=TIPO_DE_MEDIO, headers=cabeceras
+    )
 
 
 async def manejar_error_de_dominio(_: Request, excepcion: Exception) -> JSONResponse:
@@ -65,7 +74,9 @@ async def manejar_error_de_dominio(_: Request, excepcion: Exception) -> JSONResp
 async def manejar_error_http(_: Request, excepcion: Exception) -> JSONResponse:
     error = cast(HTTPException, excepcion)
     codigo = CODIGOS_POR_ESTADO_HTTP.get(error.status_code, "error_http")
-    return crear_problema(HTTPStatus(error.status_code), codigo, str(error.detail))
+    return crear_problema(
+        HTTPStatus(error.status_code), codigo, str(error.detail), cabeceras=error.headers
+    )
 
 
 async def manejar_solicitud_invalida(_: Request, excepcion: Exception) -> JSONResponse:

@@ -104,3 +104,12 @@ async def test_pedir_ruta_o_metodo_inexistente_responde_problem_json(
     assert respuesta.status_code == estado
     assert respuesta.headers["content-type"] == "application/problem+json"
     assert respuesta.json()["code"] == codigo
+
+
+async def test_pedir_metodo_no_permitido_conserva_la_cabecera_allow(
+    cliente: httpx.AsyncClient,
+) -> None:
+    respuesta = await cliente.post("/salud")
+
+    assert respuesta.status_code == 405
+    assert "GET" in respuesta.headers["allow"]
