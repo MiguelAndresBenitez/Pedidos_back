@@ -24,6 +24,10 @@ INSERTAR_NOTA = text(
     "INSERT INTO notas_de_prueba (id, local_id, texto) VALUES (:id, :local_id, :texto)"
 )
 CONTAR_NOTAS = text("SELECT count(*) FROM notas_de_prueba")
+ACTUALIZAR_TEXTO = text("UPDATE notas_de_prueba SET texto = :texto")
+BORRAR_NOTAS = text("DELETE FROM notas_de_prueba")
+MOVER_DE_LOCAL = text("UPDATE notas_de_prueba SET local_id = :otro")
+LEER_TEXTOS = text("SELECT texto FROM notas_de_prueba")
 
 
 @pytest.fixture
@@ -84,6 +88,45 @@ async def test_insertar_nota_a_nombre_de_otro_local_falla(
                 INSERTAR_NOTA,
                 {"id": Identificador.generar().valor, "local_id": local_b.valor, "texto": "x"},
             )
+
+
+async def test_actualizar_notas_de_otro_local_no_afecta_filas(
+    fabrica: async_sessionmaker[AsyncSession],
+) -> None:
+    local_a, local_b = LocalId.generar(), LocalId.generar()
+    await insertar_nota(fabrica, local_b, "nota de B")
+
+    async with UnidadDeTrabajoSQLAlchemy(fabrica, local_a) as unidad:
+        resultado = await unidad.sesion.execute(ACTUALIZAR_TEXTO, {"texto": "pisada"})
+        assert resultado.rowcount == 0  # type: ignore[attr-defined]
+
+    async with UnidadDeTrabajoSQLAlchemy(fabrica, local_b) as unidad:
+        textos = (await unidad.sesion.scalars(LEER_TEXTOS)).all()
+    assert textos == ["nota de B"]
+
+
+async def test_borrar_notas_de_otro_local_no_afecta_filas(
+    fabrica: async_sessionmaker[AsyncSession],
+) -> None:
+    local_a, local_b = LocalId.generar(), LocalId.generar()
+    await insertar_nota(fabrica, local_b, "nota de B")
+
+    async with UnidadDeTrabajoSQLAlchemy(fabrica, local_a) as unidad:
+        resultado = await unidad.sesion.execute(BORRAR_NOTAS)
+        assert resultado.rowcount == 0  # type: ignore[attr-defined]
+
+    assert await contar_notas(fabrica, local_b) == 1
+
+
+async def test_mover_una_nota_propia_a_otro_local_falla(
+    fabrica: async_sessionmaker[AsyncSession],
+) -> None:
+    local_a, local_b = LocalId.generar(), LocalId.generar()
+    await insertar_nota(fabrica, local_a, "nota de A")
+
+    async with UnidadDeTrabajoSQLAlchemy(fabrica, local_a) as unidad:
+        with pytest.raises(DBAPIError, match="row-level security"):
+            await unidad.sesion.execute(MOVER_DE_LOCAL, {"otro": local_b.valor})
 
 
 async def test_consultar_sin_local_fijado_falla(
