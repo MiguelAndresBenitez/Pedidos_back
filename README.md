@@ -21,3 +21,6 @@ cp .env.ejemplo .env     # y cambiar las contraseñas
 docker compose up --build
 curl localhost:8000/salud
 ```
+
+Las contraseñas solo pueden tener letras, números, `-` y `_`: van dentro de URLs de conexión.
+Los roles se crean con el volumen vacío: si cambiás claves después del primer arranque, corré `docker compose down -v`.
