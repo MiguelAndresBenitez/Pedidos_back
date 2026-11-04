@@ -55,7 +55,8 @@ Todo el código va en español: clases, métodos, variables, tests, tablas, colu
 | Adapter | Implementación concreta de un puerto | `UnidadDeTrabajoSQLAlchemy` |
 | Jerarquía de errores por categoría | Errores de dominio que el borde traduce | `TiendaCerrada(ReglaDeNegocioIncumplida)` |
 | Tabla de despacho (dict) | Elegir comportamiento según tipo, sin `if` encadenados | `ESTADOS_POR_CATEGORIA` en `api/errores_http.py` |
-| State | El comportamiento de una entidad cambia según su estado | Estados de `Pedido` (etapa 4) |
+| Polimorfismo por variantes | Una parte de una entidad se comporta distinto según lo que es, sin transiciones con reglas | `Activo`/`Suspendido`, `SinCierre`/`CierrePorJornada`/`CierreHastaNuevoAviso` (etapa 1a) |
+| State | Máquina de estados con transiciones y reglas | Estados de `Pedido` (etapa 4) |
 
 ## Requisitos de detalle
 
@@ -92,16 +93,30 @@ infraestructura → aplicacion → dominio
 - Todos pueden importar `compartido`.
 - `api` es la raíz de composición y puede importar cualquier capa.
 
-### Condicionales permitidos
-- Mappers de infraestructura (base → dominio)
-- Manejadores de excepciones (excepción → HTTP)
-- Validación dentro de value objects (`if not valido: raise`)
-- Tests
-
 ### Condicionales prohibidos
-- Métodos de entidades (usar State)
+Ningún `if` que elija comportamiento según el tipo o el estado de algo, en:
+- Métodos de entidades y objetos de valor
 - Lógica de casos de uso (delegar en el dominio)
 - Orquestación de servicios
+
+Las variantes de comportamiento son clases que responden (polimorfismo): cada variante implementa el mismo método a su manera, y quien la usa la llama sin preguntar cuál es. El patrón State completo, con transiciones y sus reglas, se usa solo cuando hay una máquina de estados real (estados del pedido).
+
+```python
+# Mal: el Local pregunta qué estado tiene
+if self._estado == "suspendido":
+    raise LocalSuspendido(...)
+
+# Bien: el estado responde
+self._estado.asegurar_modificable()   # Activo no hace nada; Suspendido lanza LocalSuspendido
+```
+
+### Condicionales permitidos
+- Validación al construir objetos de valor (`if not valido: raise`)
+- Guard clauses `asegurar_<condicion>` (`if` + `raise`)
+- Expresiones booleanas y aritméticas que calculan un valor sin elegir comportamiento (`and`, `any(...)`, `%`, `max(...)`)
+- Mappers de infraestructura (base → dominio): eligen la clase a partir del dato guardado, preferentemente con una tabla de despacho (`{"activo": Activo, "suspendido": Suspendido}`)
+- Manejadores de excepciones (excepción → HTTP)
+- Tests
 
 ## Registro de decisiones
 
@@ -111,3 +126,4 @@ infraestructura → aplicacion → dominio
 | 2026-10-28 | Python 3.13, `uv`, `uuid-utils`, testcontainers, GitHub Actions y pre-commit | Aprobado para la etapa 0 | Etapa 0 |
 | 2026-10-28 | Las tareas de configuración se verifican con comandos en lugar de TDD | No tienen lógica que testear | Etapa 0: 00, 02, 14 |
 | 2026-10-28 | `tests/soporte/` con `pythonpath = ["tests"]` para tipar fixtures; marca `integracion`; SQL como constantes `text(...)`; alcances de commit fijos | Extracción tras 10 tareas, aprobada por el usuario | Etapa 0: 01, 09, 10, 12, 13 |
+| 2026-11-03 | Condicionales: se prohíbe el `if` que elige comportamiento, no el patrón; variantes por polimorfismo y State solo para máquinas de estados reales. Se permiten guard clauses y expresiones booleanas | "Usar State" obligaba al patrón completo donde no hay transiciones (por ejemplo, "abierto ahora"); aprobado por el usuario | Etapa 1 en adelante |
