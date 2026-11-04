@@ -1,0 +1,1 @@
+"""Raíz de composición HTTP."""
