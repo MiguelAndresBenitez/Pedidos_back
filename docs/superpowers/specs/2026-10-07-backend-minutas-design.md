@@ -3,6 +3,8 @@
 2026-10-07 · Miguel
 
 > Versión exportada del doc colaborativo [Spec backend — Minutas](https://claude.ai/code/artifact/a10170a2-6af5-400b-8901-763c27b3c263).
+>
+> **Actualizada el 2026-11-03** con las decisiones del diseño de la etapa 1 ([`2026-11-03-etapa-1-identidad-y-locales-design.md`](2026-11-03-etapa-1-identidad-y-locales-design.md)): RLS por operación en `locales`, instantes en UTC y horas de reloj en hora local, login vinculado por `sub`, cookie `__Host-`, despliegue con proxy en un solo dominio, imágenes servidas por la API, errores 401 y 403, y la etapa 1 partida en 1a y 1b.
 
 ## Contexto y objetivo
 
@@ -52,7 +54,7 @@ El stack ya está fijado en el brief v4: Python con DDD en el backend, todo en c
 | API | FastAPI | Los routers son adaptadores de entrada; el dominio es Python puro, sin FastAPI ni SQLAlchemy |
 | Persistencia | PostgreSQL + SQLAlchemy 2.0 + Alembic | Mapeo imperativo en infraestructura; las entidades no heredan de modelos ORM |
 | Login | Google (OpenID Connect) | Puerto de proveedor de identidad con un adaptador de Google |
-| Imágenes | Puerto de almacenamiento | Adaptador de disco local en desarrollo y de S3 en producción |
+| Imágenes | Puerto de almacenamiento | Re-codificadas a WebP con Pillow. Adaptador de disco servido por la API con caché permanente; S3 + CDN como siguiente adaptador, obligatorio antes de correr más de una instancia |
 | Entorno | Docker Compose | Configuración por variables de entorno; misma imagen para desarrollo y deploy |
 | Calidad | Plugin ddd-workflow | Plan por partes con revisión de diseño, y revisión DDD + OOP al cerrar cada etapa |
 
@@ -73,7 +75,8 @@ El backend es un monolito modular: una API y una base, con cuatro bounded contex
 
 **Numeración del pedido.** El número es correlativo por local y se reinicia cada jornada: corto para cantarlo en el mostrador, sin huecos ni duplicados bajo concurrencia.
 
-- Jornada = fecha en la zona horaria del local, corrida por una hora de corte configurable por local (por defecto 06:00). Así un turno de 20:00 a 02:00 no se parte en dos numeraciones a medianoche.
+- Jornada = fecha en la zona horaria del local, corrida por una hora de corte configurable por local (por defecto 06:00). Así un turno de 20:00 a 02:00 no se parte en dos numeraciones a medianoche. Un cambio de hora de corte rige desde la próxima jornada, así la jornada nunca retrocede y la numeración no se pisa (detalle en el diseño de la etapa 1).
+- Tiempo: los instantes se guardan en UTC (`timestamptz`); las franjas y la hora de corte, en hora local junto con la zona horaria del local.
 - Tabla `contadores_pedido (local_id, jornada, ultimo_numero)`, con RLS como toda tabla del local.
 - Dentro de la misma transacción que guarda el pedido: `INSERT … ON CONFLICT (local_id, jornada) DO UPDATE SET ultimo_numero = contadores_pedido.ultimo_numero + 1 RETURNING ultimo_numero`. El bloqueo de fila serializa los pedidos de un mismo local; locales distintos no se bloquean entre sí.
 - Si la transacción falla, el incremento se deshace: no quedan huecos.
@@ -86,7 +89,16 @@ El backend es un monolito modular: una API y una base, con cuatro bounded contex
 
 Cada local es un tenant dentro de una sola base y un solo esquema, aislado en dos capas: los repositorios filtran por `local_id` y PostgreSQL lo vuelve a exigir con Row Level Security (RLS). Si una consulta olvida el filtro, la base devuelve cero filas en vez de datos de otro local.
 
-**Tablas de plataforma y tablas del local.** `locales`, `usuarios` y `membresias` (usuario, local, rol) son de plataforma y no llevan RLS: se consultan antes de saber de qué local se trata (resolver un slug, validar un login). Todo lo demás (categorías, productos, opciones, horarios, pedidos, contadores) lleva `local_id` no nulo, indexado, con RLS activado y forzado.
+**Regla de aislamiento.** Toda escritura exige el local fijado en la transacción, sin excepción. Ningún local puede leer ni modificar datos de otro; el cliente final lee horarios y carta a través de la tienda pública, que fija el local después de resolver el slug.
+
+**Tablas de plataforma y tablas del local.**
+
+- `locales` lleva RLS **por operación**: `SELECT` abierto, porque se lee antes de saber de qué local se trata (resolver el slug), e `INSERT`/`UPDATE` solo con `id = app.local_id`. No tiene política de `DELETE`.
+- `usuarios` y `sesiones` son de plataforma y no llevan RLS: no pertenecen a ningún local.
+- `membresias` (usuario, local, rol) se lee en el login antes de saber el local. Sus políticas quedan pendientes; la propuesta es el mismo esquema que `locales`.
+- Todo lo demás (franjas horarias, categorías, productos, opciones, pedidos, contadores) lleva `local_id` no nulo, indexado, con RLS activado y forzado para lectura y escritura.
+
+Hay dos unidades de trabajo: la **del local**, que fija `app.local_id` y carga, entre otros, el agregado `Local` completo; y la **de plataforma**, sin local fijado, para usuarios, sesiones y la resolución del slug.
 
 **Cómo se fija el tenant en cada request:**
 
@@ -107,21 +119,22 @@ CREATE POLICY aislamiento_local ON productos
 
 **Roles de base de datos.** La app se conecta con un rol sin `BYPASSRLS` que no es dueño de las tablas. Las migraciones de Alembic corren con un rol dueño, separado. Si `app.local_id` no está seteado, `current_setting` falla y la consulta se corta: falla cerrado.
 
-**Autenticación.** El front obtiene un ID token de Google y lo envía a la API. El adaptador de Google verifica firma, audiencia, expiración y `email_verified`; el caso de uso busca el email en `usuarios` y rechaza si no está dado de alta. Si el email existe, se crea una sesión en la base.
+**Autenticación.** El front obtiene un ID token de Google y lo envía a la API. El adaptador de Google (`google-auth`, ejecutado en un hilo aparte y con caché de las claves de Google) verifica firma, audiencia, emisor, expiración y `email_verified`. En el primer login, el usuario dado de alta por email queda vinculado al `sub` de su cuenta de Google; desde entonces se lo busca por `sub`, porque el email de una cuenta de Google puede cambiar. Si no coincide, responde `403 usuario_no_habilitado`. Si coincide, se crea una sesión en la base.
 
 **Sesión.** La sesión vive en la base y el navegador solo guarda un ID opaco: se revoca al instante borrando la fila, y rol y membresía se leen frescos en cada request.
 
 - Tabla `sesiones`, de plataforma y sin RLS: id, usuario, hash SHA-256 del token, creada, último uso, expira, IP y user-agent.
 - Token aleatorio de 256 bits; en la base se guarda solo su hash, así un volcado de la tabla no sirve para entrar.
-- Cookie `httpOnly`, `Secure`, `SameSite=Lax`, sin datos del usuario.
-- Expiración deslizante: cada uso extiende la sesión, con un tope absoluto; el panel abierto todo el día en la tablet no se desloguea.
+- Cookie `__Host-sesion`, `HttpOnly`, `Secure`, `SameSite=Lax`, `Path=/`, con `Max-Age` igual al tope absoluto y sin datos del usuario.
+- Expiración deslizante: vence a los 7 días sin uso, con un tope absoluto de 30 días; el panel abierto todo el día en la tablet no se desloguea. El último uso se actualiza como mucho una vez por hora.
+- CSRF: `SameSite=Lax`, y además toda request que modifica (`POST`, `PUT`, `PATCH`, `DELETE`) debe traer un `Origin` permitido (`MINUTAS_ORIGENES_PERMITIDOS`); si no, `403 origen_no_permitido`.
 - Logout borra la fila (borrado físico, única excepción al borrado lógico); el CLI puede revocar todas las sesiones de un usuario.
 - Las sesiones vencidas se rechazan al validar y se purgan periódicamente.
 - Los valores de expiración y tope son configuración por variables de entorno.
 
 **Roles.** La membresía guarda el rol; hoy existe solo `admin`. Los permisos se chequean en la capa de aplicación por caso de uso, así sumar cajero o cocina es agregar un rol y sus permisos.
 
-**Owner de la plataforma.** En el MVP el owner no tiene usuario en la app: opera por CLI dentro del contenedor, y su barrera es el acceso a la infraestructura. El CLI es un adaptador de entrada más, que invoca los mismos casos de uso que usará el futuro panel (`DarDeAltaLocal`, `DarDeAltaAdmin`, `RevocarSesiones`) sobre tablas de plataforma, sin fijar tenant, y registra cada comando en el log.
+**Owner de la plataforma.** En el MVP el owner no tiene usuario en la app: opera por CLI dentro del contenedor, y su barrera es el acceso a la infraestructura. El CLI es un adaptador de entrada más, que invoca los mismos casos de uso que usará el futuro panel (`DarDeAltaLocal`, `DarDeAltaAdmin`, `RevocarSesiones`, entre otros). Todo comando que toca un local fija ese local, igual que la API, y cada comando queda registrado en el log.
 
 El panel del owner y el acceso de soporte a los datos de un local quedan para una versión posterior, con estos puntos de enganche ya previstos:
 
@@ -225,7 +238,8 @@ El dominio falla con excepciones propias que solo se traducen a HTTP en el borde
 
 **Errores**
 
-- El dominio lanza excepciones propias (`TiendaCerrada`, `SeleccionInvalida`, `TransicionInvalida`). Un manejador de FastAPI las traduce a `problem+json` con su código HTTP: 404, 409, 422 o 429.
+- El dominio lanza excepciones propias (`TiendaCerrada`, `SeleccionInvalida`, `TransicionInvalida`). Un manejador de FastAPI las traduce a `problem+json` con su código HTTP: 401, 403, 404, 409, 422 o 429.
+- 401 (`NoAutenticado`): no se sabe quién es (token inválido, sin sesión o sesión vencida). 403 (`AccesoDenegado`): se sabe quién es y no puede (usuario no habilitado, local suspendido, origen no permitido). Las dos categorías están decididas y entran con la etapa 1b.
 - Un error no previsto devuelve un 500 genérico sin detalles internos y se loguea con su `request_id`.
 - Logs estructurados en JSON con `request_id` y `local_id` en cada línea.
 
@@ -246,15 +260,19 @@ Herramientas: `pytest`, `ruff` y `mypy`.
 - Docker Compose con API y PostgreSQL; una sola imagen para desarrollo y producción, configurada por variables de entorno.
 - Migraciones de Alembic como paso separado del arranque, con el rol dueño de las tablas.
 - Nube a definir, probablemente AWS (brief D15); el diseño no depende del proveedor.
+- Un solo dominio (`minutas.app`, provisorio) con un proxy que reparte por ruta: `/api/*` a la API y el resto al front, en servidores distintos. La cookie de sesión y la ausencia de CORS dependen de eso: el panel y la API tienen que compartir sitio.
+- La API confía en los headers `X-Forwarded-*` solo si vienen del proxy (`--proxy-headers` y `--forwarded-allow-ips`), y el proxy tiene que soportar SSE.
+- Una sola instancia de la API mientras las imágenes estén en disco.
 
 ## Plan de módulos
 
-El backend se entrega en cinco etapas verticales, en orden de dependencia; al cerrar la etapa 4 se cumple el criterio de éxito del MVP. Cada etapa tiene su propio plan con `ddd-workflow:plan-create` y su revisión DDD + OOP al cerrarla.
+El backend se entrega en etapas verticales (la 1 partida en dos), en orden de dependencia; al cerrar la etapa 4 se cumple el criterio de éxito del MVP. Cada etapa tiene su propio plan con `ddd-workflow:plan-create` y su revisión DDD + OOP al cerrarla.
 
 | # | Etapa | Qué incluye | Queda funcionando |
 | --- | --- | --- | --- |
 | 0 | Fundaciones | Paquetes por contexto, Docker Compose, configuración por entorno, roles de base, Alembic, unidad de trabajo con `SET LOCAL app.local_id`, base de RLS, UUIDv7, errores `problem+json`, logs, `pytest`, `ruff` y `mypy` | La API arranca, migra y tiene el aislamiento probado con una tabla de ejemplo |
-| 1 | Identidad y Locales | CLI de alta de local y admin, login con Google, sesiones, membresía, `/panel/local`, horarios, cierre manual, jornada con hora de corte, almacenamiento de imágenes, `GET /tiendas/{slug}` | Un local dado de alta por CLI, con su admin logueado y configurándolo |
+| 1a | Locales | Agregado `Local`, horarios, jornada con hora de corte, cierre manual, suspensión, almacenamiento de imágenes, CLI de locales, `GET /tiendas/{slug}` | Un local dado de alta por CLI, con su tienda respondiendo si está abierta |
+| 1b | Identidad | Usuarios, membresía, login con Google, sesiones, CLI de admins y sesiones, `/panel/local` | El admin del local logueado y configurándolo |
 | 2 | Carta | Categorías ordenables, productos con grupos y opciones, sin stock, foto, borrado lógico, `GET /tiendas/{slug}/carta` | El admin carga la carta y la tienda la muestra |
 | 3 | Pedidos: checkout | Confirmación del pedido, validación contra Carta y Locales, copia de precios, numeración por jornada, link `wa.me`, límite de 5 pedidos cada 15 minutos por IP, pantalla de pedido enviado | Un cliente confirma un pedido real |
 | 4 | Pedidos: gestión | Historial con filtros, avanzar y cancelar, máquina de estados, SSE con `LISTEN/NOTIFY`, comanda | El local recibe el pedido en vivo, lo avanza y lo imprime |
