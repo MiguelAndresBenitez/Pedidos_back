@@ -14,8 +14,12 @@ COPY alembic.ini ./
 RUN uv sync --frozen --no-dev
 
 RUN useradd --system --uid 10001 minutas
+# El volumen de imágenes hereda este dueño al crearse vacío.
+RUN mkdir -p /var/lib/minutas/imagenes && chown minutas /var/lib/minutas/imagenes
 USER minutas
 
 ENV PATH="/app/.venv/bin:$PATH"
 EXPOSE 8000
-CMD ["uvicorn", "--factory", "minutas.api.app:crear_app_desde_entorno", "--host", "0.0.0.0", "--port", "8000"]
+# `--proxy-headers`: la IP real llega del proxy; `FORWARDED_ALLOW_IPS` dice cuál es el proxy.
+ENV FORWARDED_ALLOW_IPS=127.0.0.1
+CMD ["uvicorn", "--factory", "minutas.api.app:crear_app_desde_entorno", "--host", "0.0.0.0", "--port", "8000", "--proxy-headers"]
