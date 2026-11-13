@@ -4,8 +4,10 @@ from fastapi import FastAPI
 
 from minutas.api.app import crear_app
 from minutas.compartido.dominio.errores import (
+    AccesoDenegado,
     Conflicto,
     LimiteExcedido,
+    NoAutenticado,
     NoEncontrado,
     ReglaDeNegocioIncumplida,
 )
@@ -24,6 +26,8 @@ def app(configuracion: Configuracion) -> FastAPI:
         "no-encontrado": NoEncontrado("No existe"),
         "conflicto": Conflicto("Choca con otro dato"),
         "limite": LimiteExcedido("Demasiados pedidos"),
+        "no-autenticado": NoAutenticado("Iniciá sesión"),
+        "acceso-denegado": AccesoDenegado("No podés hacer esto"),
         "inesperado": RuntimeError("secreto interno"),
     }
 
@@ -45,6 +49,8 @@ def app(configuracion: Configuracion) -> FastAPI:
         ("no-encontrado", 404, "no_encontrado", "No existe"),
         ("conflicto", 409, "conflicto", "Choca con otro dato"),
         ("limite", 429, "limite_excedido", "Demasiados pedidos"),
+        ("no-autenticado", 401, "no_autenticado", "Iniciá sesión"),
+        ("acceso-denegado", 403, "acceso_denegado", "No podés hacer esto"),
     ],
 )
 async def test_lanzar_error_de_dominio_responde_problem_json(

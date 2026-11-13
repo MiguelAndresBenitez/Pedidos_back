@@ -13,9 +13,11 @@ from starlette.exceptions import HTTPException
 
 from minutas.api.middleware_de_solicitud import CABECERA_ID_DE_SOLICITUD
 from minutas.compartido.dominio.errores import (
+    AccesoDenegado,
     Conflicto,
     ErrorDeDominio,
     LimiteExcedido,
+    NoAutenticado,
     NoEncontrado,
     ReglaDeNegocioIncumplida,
 )
@@ -24,6 +26,8 @@ from minutas.compartido.infraestructura.registro import obtener_contexto
 TIPO_DE_MEDIO = "application/problem+json"
 
 ESTADOS_POR_CATEGORIA: dict[type[ErrorDeDominio], HTTPStatus] = {
+    NoAutenticado: HTTPStatus.UNAUTHORIZED,
+    AccesoDenegado: HTTPStatus.FORBIDDEN,
     NoEncontrado: HTTPStatus.NOT_FOUND,
     Conflicto: HTTPStatus.CONFLICT,
     ReglaDeNegocioIncumplida: HTTPStatus.UNPROCESSABLE_ENTITY,

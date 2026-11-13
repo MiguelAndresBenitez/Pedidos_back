@@ -1,9 +1,11 @@
 import pytest
 
 from minutas.compartido.dominio.errores import (
+    AccesoDenegado,
     Conflicto,
     ErrorDeDominio,
     LimiteExcedido,
+    NoAutenticado,
     NoEncontrado,
     ReglaDeNegocioIncumplida,
 )
@@ -28,6 +30,8 @@ def test_crear_error_de_dominio_guarda_mensaje_y_codigo() -> None:
         (Conflicto, "conflicto"),
         (ReglaDeNegocioIncumplida, "regla_de_negocio_incumplida"),
         (LimiteExcedido, "limite_excedido"),
+        (NoAutenticado, "no_autenticado"),
+        (AccesoDenegado, "acceso_denegado"),
     ],
 )
 def test_crear_categoria_de_error_tiene_codigo_propio(

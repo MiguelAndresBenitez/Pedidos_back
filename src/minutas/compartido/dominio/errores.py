@@ -35,6 +35,18 @@ class ReglaDeNegocioIncumplida(ErrorDeDominio):
     codigo = "regla_de_negocio_incumplida"
 
 
+class NoAutenticado(ErrorDeDominio):
+    """Falta una credencial válida: sesión o token de un proveedor."""
+
+    codigo = "no_autenticado"
+
+
+class AccesoDenegado(ErrorDeDominio):
+    """Se sabe quién pide, pero no puede hacer esto."""
+
+    codigo = "acceso_denegado"
+
+
 class LimiteExcedido(ErrorDeDominio):
     """Se superó un límite de uso."""
 
