@@ -1,4 +1,5 @@
 import json
+import logging
 from collections.abc import Iterator
 
 import pytest
@@ -66,3 +67,26 @@ def test_obtener_contexto_devuelve_los_valores_vinculados() -> None:
     vincular_contexto(request_id="abc")
 
     assert obtener_contexto() == {"request_id": "abc"}
+
+
+def test_registro_de_uvicorn_sale_en_json_con_el_contexto(
+    capsys: pytest.CaptureFixture[str],
+) -> None:
+    configurar_registro("INFO")
+    vincular_contexto(request_id="abc")
+
+    logging.getLogger("uvicorn.error").warning("Puerto %s ocupado", 8000)
+
+    [linea] = leer_lineas(capsys)
+    assert linea["event"] == "Puerto 8000 ocupado"
+    assert linea["level"] == "warning"
+    assert linea["request_id"] == "abc"
+    assert "timestamp" in linea
+
+
+def test_registro_de_uvicorn_respeta_el_nivel(capsys: pytest.CaptureFixture[str]) -> None:
+    configurar_registro("WARNING")
+
+    logging.getLogger("uvicorn.access").info('127.0.0.1 - "GET /salud HTTP/1.1" 200')
+
+    assert leer_lineas(capsys) == []
