@@ -111,7 +111,7 @@ Cambiar el corte (`cambiar_hora_de_corte`) o la zona (`cambiar_zona_horaria`) de
 - Mientras haya un pendiente, las franjas se validan contra los dos cortes. El `Local` valida las franjas tanto al reemplazarlas como al cambiar el corte.
 - El panel muestra desde cuándo rigen las reglas nuevas.
 
-Ejemplo: un local en Buenos Aires (UTC−3) con corte 06:00 pasa a `America/Santiago` (UTC−4 en invierno) un sábado a las 06:30 de Buenos Aires. Si rigiera al instante, en Santiago serían las 05:30 y la jornada volvería al viernes. Con el cambio pendiente, el sábado sigue en Buenos Aires y el domingo empieza a las 06:00 de Santiago: la jornada de transición dura 25 h.
+Ejemplo: un local en Buenos Aires (UTC−3) con corte 06:00 pasa a `America/Santiago` (UTC−4 en invierno) un sábado a las 06:30 de Buenos Aires. Si rigiera al instante, en Santiago serían las 05:30 y la jornada volvería al viernes. Con el cambio pendiente, el sábado sigue en Buenos Aires; el domingo empieza a las 06:00 de Buenos Aires (05:00 en Santiago) y dura 25 h, hasta las 06:00 de Santiago del lunes.
 
 ### Cierre manual
 
@@ -304,7 +304,7 @@ Todo bajo `/api/v1`, con errores en `problem+json` como en la etapa 0.
 | `GET /tiendas/{slug}` | `200`: `slug`, `nombre`, `descripcion`, `direccion`, `whatsapp`, `color`, `modalidades`, `zona_horaria`, `horarios` (franjas en hora local), `logo_url`, `portada_url`, `abierto_ahora`, `proxima_apertura` (UTC o `null`) y `disponible: true`. Suspendido: `200 {slug, disponible: false}`. Inexistente: `404 local_no_encontrado` |
 | `GET /imagenes/{nombre}` | El archivo WebP con `Cache-Control: public, max-age=31536000, immutable`. El nombre se valida (`<uuid>.webp`) antes de tocar el disco |
 
-La tienda: la unidad de plataforma resuelve el slug a un `local_id` y la unidad del local carga el `Local` con sus franjas; las dos son de solo lectura. La hora se lee del `Reloj` una vez por solicitud y los casos de uso la reciben como `ahora`.
+La tienda: la unidad de plataforma resuelve el slug a un `local_id` y la unidad del local carga el `Local` con sus franjas; las dos son de solo lectura. `ObtenerTienda` devuelve una vista de lectura (`TiendaDisponible` con todo calculado, o `TiendaNoDisponible`) que la API solo traduce. La hora se lee del `Reloj` una vez por solicitud y los casos de uso la reciben como `ahora`.
 
 ### Consola de la 1a
 
@@ -340,7 +340,7 @@ Del owner: `DarDeAltaLocal`, `CambiarSlug`, `CambiarZonaHoraria`, `SuspenderLoca
 | `slug_invalido`, `slug_reservado`, `whatsapp_invalido`, `zona_horaria_invalida`, `franja_ambigua`, `horarios_superpuestos`, `franja_corta_la_hora_de_corte`, `dato_del_local_invalido` | 422 (categoría `ReglaDeNegocioIncumplida`) |
 | `imagen_invalida`, `imagen_demasiado_grande` | 422 |
 | `slug_en_uso`, `local_modificado_en_paralelo` | 409 |
-| `local_no_encontrado` | 404 |
+| `local_no_encontrado`, `imagen_no_encontrada` | 404 |
 | `token_invalido`, `sesion_requerida` | 401 |
 | `usuario_no_habilitado`, `local_suspendido`, `origen_no_permitido` | 403 |
 
