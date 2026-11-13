@@ -7,6 +7,11 @@ from sqlalchemy.engine import Connection
 from sqlalchemy.ext.asyncio import create_async_engine
 
 from minutas.compartido.infraestructura.configuracion import ConfiguracionDeMigraciones
+from minutas.compartido.infraestructura.metadata import METADATA
+from minutas.locales.infraestructura import tablas as tablas_de_locales
+
+# Importar los módulos de tablas las registra en METADATA, que Alembic compara con la base.
+CONTEXTOS_CON_TABLAS = (tablas_de_locales,)
 
 
 def obtener_url() -> str:
@@ -15,7 +20,7 @@ def obtener_url() -> str:
 
 
 def ejecutar_migraciones(conexion: Connection) -> None:
-    context.configure(connection=conexion, target_metadata=None)
+    context.configure(connection=conexion, target_metadata=METADATA, compare_type=True)
     with context.begin_transaction():
         context.run_migrations()
 
