@@ -42,6 +42,10 @@ class JornadaFija:
 
     def programar(self, nuevas: ReglasDeJornada, ahora: datetime) -> "JornadaConCambioPendiente":
         """Las reglas nuevas rigen desde la jornada siguiente a la actual."""
+        return self.reprogramar(nuevas, ahora)
+
+    def reprogramar(self, nuevas: ReglasDeJornada, ahora: datetime) -> "JornadaConCambioPendiente":
+        """Sin cambio pendiente, reprogramar es lo mismo que programar."""
         desde = self.jornada_de(ahora) + timedelta(days=1)
         return JornadaConCambioPendiente(self.reglas, nuevas, desde)
 
@@ -97,8 +101,10 @@ class JornadaConCambioPendiente:
 
         Si el cambio ya rige, primero se consolida: las reglas nuevas nunca rigen al instante.
         """
-        if self.ya_rige(ahora):
-            return JornadaFija(self.pendientes).programar(nuevas, ahora)
+        return self.consolidar(ahora).reprogramar(nuevas, ahora)
+
+    def reprogramar(self, nuevas: ReglasDeJornada, ahora: datetime) -> "JornadaConCambioPendiente":
+        """Reemplaza el cambio pendiente; supone que ya está consolidado (aún no rige)."""
         return JornadaConCambioPendiente(self.vigentes, nuevas, self.desde_jornada)
 
 

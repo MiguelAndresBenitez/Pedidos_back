@@ -101,3 +101,17 @@ def test_programar_cuando_el_cambio_ya_rige_no_lo_aplica_al_instante() -> None:
     assert nueva == JornadaConCambioPendiente(
         SEIS.con_corte(time(8)), SEIS.con_corte(time(5)), date(2026, 11, 10)
     )
+
+
+def test_reprogramar_desde_reglas_fijas_rige_desde_la_jornada_siguiente() -> None:
+    jornada = JornadaFija(SEIS).reprogramar(SEIS.con_corte(time(8)), utc(7, 12))
+
+    assert jornada == JornadaConCambioPendiente(SEIS, SEIS.con_corte(time(8)), date(2026, 11, 8))
+
+
+def test_reprogramar_pendiente_reemplaza_el_cambio_sin_consolidar() -> None:
+    pendiente = JornadaConCambioPendiente(SEIS, SEIS.con_corte(time(8)), date(2026, 11, 8))
+
+    nueva = pendiente.reprogramar(SEIS.con_zona(SANTIAGO), utc(8, 12))
+
+    assert nueva == JornadaConCambioPendiente(SEIS, SEIS.con_zona(SANTIAGO), date(2026, 11, 8))
