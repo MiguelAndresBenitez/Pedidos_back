@@ -35,12 +35,22 @@ async def test_obtener_imagen_la_sirve_con_cache_de_un_anio(cliente: httpx.Async
     assert respuesta.headers["cache-control"] == "public, max-age=31536000, immutable"
 
 
-@pytest.mark.parametrize(
-    "nombre", ["..%2F..%2Fetc%2Fpasswd", "logo.png", "01a18e9b-3c49-75a8-a745-cbce398ad79b.webp"]
-)
+@pytest.mark.parametrize("nombre", ["logo.png", "01a18e9b-3c49-75a8-a745-cbce398ad79b.webp"])
 async def test_obtener_imagen_invalida_o_inexistente_responde_404(
     cliente: httpx.AsyncClient, nombre: str
 ) -> None:
     respuesta = await cliente.get(f"/api/v1/imagenes/{nombre}")
 
     assert respuesta.status_code == 404
+    assert respuesta.json()["code"] == "imagen_no_encontrada"
+
+
+async def test_obtener_imagen_con_barras_codificadas_no_llega_a_la_ruta(
+    cliente: httpx.AsyncClient,
+) -> None:
+    respuesta = await cliente.get("/api/v1/imagenes/..%2F..%2Fetc%2Fpasswd")
+
+    assert respuesta.status_code == 404
+    # El %2F se decodifica antes de rutear: queda un path de varios segmentos que ninguna ruta
+    # acepta, así que responde el 404 genérico y no el de la imagen.
+    assert respuesta.json()["code"] == "ruta_inexistente"

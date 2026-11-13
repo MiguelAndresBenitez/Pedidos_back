@@ -1,6 +1,7 @@
 import io
 from collections.abc import AsyncIterator
-from datetime import time
+from dataclasses import replace
+from datetime import UTC, datetime, time
 from pathlib import Path
 
 import httpx
@@ -18,6 +19,7 @@ from minutas.locales.dominio.horario import Horario
 from minutas.locales.dominio.imagen import TipoDeImagen
 from minutas.locales.dominio.slug import Slug
 from soporte.base_de_prueba import BaseDePrueba
+from soporte.reloj_fijo import RelojFijo
 
 pytestmark = pytest.mark.integracion
 
@@ -43,7 +45,9 @@ def configuracion(base_migrada: BaseDePrueba, tmp_path: Path) -> Configuracion:
 
 @pytest.fixture
 async def servicios(configuracion: Configuracion) -> AsyncIterator[Servicios]:
-    servicios = crear_servicios(configuracion)
+    # Reloj fijo con el local abierto: el horario lo deja cerrado un minuto por día.
+    reloj = RelojFijo(datetime(2026, 11, 7, 15, 0, tzinfo=UTC))
+    servicios = replace(crear_servicios(configuracion), reloj=reloj)
     yield servicios
     await servicios.cerrar()
 
@@ -74,8 +78,9 @@ async def test_local_dado_de_alta_por_consola_abre_su_tienda_y_se_suspende(
     tienda = (await cliente.get("/api/v1/tiendas/la-esquina")).json()
     assert tienda["abierto_ahora"] is True
     assert tienda["whatsapp"] == "5493515123456"
-    logo = await cliente.get(tienda["logo_url"])
     assert tienda["logo_url"] == f"/api/v1/imagenes/{nombre}"
+    logo = await cliente.get(tienda["logo_url"])
+    assert logo.status_code == 200
     assert Image.open(io.BytesIO(logo.content)).size == (512, 512)
 
     assert await correr(["suspender-local", "--slug", "la-esquina"], servicios) == 0
