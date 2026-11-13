@@ -1,7 +1,6 @@
 """Comandos del owner. Cada uno ejecuta un caso de uso y devuelve el texto para la consola."""
 
 import argparse
-from collections.abc import Awaitable, Callable
 from datetime import datetime
 
 from minutas.composicion import CasosDeUso
@@ -9,8 +8,6 @@ from minutas.locales.dominio.modalidad import Modalidad
 from minutas.locales.dominio.slug import Slug
 from minutas.locales.dominio.whatsapp import Whatsapp
 from minutas.locales.dominio.zona_horaria import ZonaHoraria
-
-type Comando = Callable[[argparse.Namespace, CasosDeUso, datetime], Awaitable[str]]
 
 
 def leer_modalidades(texto: str) -> frozenset[Modalidad]:

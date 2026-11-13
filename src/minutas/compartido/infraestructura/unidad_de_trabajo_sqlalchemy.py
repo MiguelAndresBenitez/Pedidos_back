@@ -12,7 +12,11 @@ FIJAR_LOCAL = text("SELECT set_config('app.local_id', :local_id, true)")
 
 
 class UnidadDeTrabajoDePlataformaSQLAlchemy:
-    """Transacción sin tenant: solo ve las tablas de plataforma, que no tienen RLS."""
+    """Transacción sin tenant: no fija `app.local_id`.
+
+    Bajo RLS solo puede leer lo que las políticas abren sin local (p. ej. `lectura_publica`
+    de `locales`) y no puede escribir en las tablas aisladas por local.
+    """
 
     def __init__(self, fabrica_de_sesiones: async_sessionmaker[AsyncSession]) -> None:
         self._sesion = fabrica_de_sesiones()

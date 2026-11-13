@@ -104,7 +104,11 @@ class JornadaConCambioPendiente:
         return self.consolidar(ahora).reprogramar(nuevas, ahora)
 
     def reprogramar(self, nuevas: ReglasDeJornada, ahora: datetime) -> "JornadaConCambioPendiente":
-        """Reemplaza el cambio pendiente; supone que ya está consolidado (aún no rige)."""
+        """Reemplaza el cambio pendiente.
+
+        Precondición: la jornada ya está consolidada (el cambio pendiente aún no rige).
+        El punto de entrada es `programar`, que consolida antes de reprogramar.
+        """
         return JornadaConCambioPendiente(self.vigentes, nuevas, self.desde_jornada)
 
 

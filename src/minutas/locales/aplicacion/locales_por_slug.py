@@ -23,7 +23,10 @@ class LocalesPorSlug:
         self._crear_unidad_del_local = crear_unidad_del_local
 
     async def obtener(self, slug: Slug) -> Local:
-        """Dos pasos de solo lectura. Si el slug cambia en el medio, responde que no existe."""
+        """Resuelve el id por slug y carga el local por id.
+
+        Si el slug cambió entre los dos pasos, devuelve el local con el slug nuevo.
+        """
         async with self._crear_unidad_del_local(await self._resolver(slug)) as unidad:
             return await unidad.locales.obtener()
 
