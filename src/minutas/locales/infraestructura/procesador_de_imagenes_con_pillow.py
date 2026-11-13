@@ -2,6 +2,7 @@
 
 import asyncio
 import io
+import struct
 
 from PIL import Image, ImageOps, UnidentifiedImageError
 
@@ -35,6 +36,15 @@ class ProcesadorDeImagenesConPillow:
                 salida = io.BytesIO()
                 # Re-codificar descarta los metadatos (EXIF, GPS) del original.
                 imagen.save(salida, format="WEBP", quality=CALIDAD_WEBP)
-        except (UnidentifiedImageError, OSError, Image.DecompressionBombError) as error:
+        # Los archivos corruptos hacen que Pillow lance, según el formato, cualquiera de estos.
+        except (
+            UnidentifiedImageError,
+            OSError,
+            EOFError,
+            ValueError,
+            SyntaxError,
+            struct.error,
+            Image.DecompressionBombError,
+        ) as error:
             raise ImagenInvalida("La imagen tiene que ser un JPEG, PNG o WebP válido") from error
         return salida.getvalue()

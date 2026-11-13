@@ -1,5 +1,7 @@
 import io
 import os
+import struct
+import zlib
 from pathlib import Path
 
 import pytest
@@ -127,3 +129,39 @@ async def test_obtener_ruta_de_una_imagen_inexistente_falla(tmp_path: Path) -> N
 
     with pytest.raises(ImagenNoEncontrada):
         await almacen.obtener_ruta(NombreDeImagen("01a18e9b-3c49-75a8-a745-cbce398ad79a.webp"))
+
+
+def png_con_ihdr_corto() -> bytes:
+    """PNG cuyo chunk IHDR (con CRC válido) mide 5 bytes en vez de 13: Pillow lanza ValueError."""
+    original = imagen(64, 64, "PNG")
+    cuerpo = b"\x00" * 5
+    chunk = struct.pack(">I", len(cuerpo)) + b"IHDR" + cuerpo
+    chunk += struct.pack(">I", zlib.crc32(b"IHDR" + cuerpo))
+    return original[:8] + chunk + original[8 + 25 :]
+
+
+def png_con_datos_corruptos() -> bytes:
+    """PNG con el IDAT lleno de basura (CRC válido): Pillow lanza OSError al decodificar."""
+    original = imagen(64, 64, "PNG")
+    inicio = original.index(b"IDAT") - 4
+    basura = b"basura"
+    chunk = struct.pack(">I", len(basura)) + b"IDAT" + basura
+    chunk += struct.pack(">I", zlib.crc32(b"IDAT" + basura))
+    return original[:inicio] + chunk + original[-12:]
+
+
+@pytest.mark.parametrize(
+    "contenido",
+    [
+        pytest.param(png_con_ihdr_corto(), id="png-con-ihdr-corto"),
+        pytest.param(png_con_datos_corruptos(), id="png-con-datos-corruptos"),
+        pytest.param(imagen(64, 64, "PNG")[:40], id="png-truncado-en-el-encabezado"),
+        pytest.param(imagen(512, 512, "PNG")[:-200], id="png-truncado-al-final"),
+        pytest.param(imagen(512, 512, "JPEG")[:-300], id="jpeg-truncado"),
+    ],
+)
+async def test_procesar_archivo_corrupto_es_imagen_invalida(
+    procesador: ProcesadorDeImagenesConPillow, contenido: bytes
+) -> None:
+    with pytest.raises(ImagenInvalida):
+        await procesador.procesar(contenido, TipoDeImagen.LOGO.medidas_maximas)
