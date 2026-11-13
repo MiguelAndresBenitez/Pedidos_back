@@ -2,7 +2,9 @@
 
 2026-11-03 · Miguel
 
-> Reemplaza a la minuta "Etapa 1 (Identidad y Locales): diseño en curso" (PDF). Incorpora la revisión de esa minuta y completa la Sección 3. La Sección 4 (endpoints y pruebas) sigue pendiente.
+> Reemplaza a la minuta "Etapa 1 (Identidad y Locales): diseño en curso" (PDF). Incorpora la revisión de esa minuta y completa la Sección 3.
+>
+> **Actualizado el 2026-11-13:** se cierran los pendientes de la 1a (bloqueo optimista, WhatsApp, próxima apertura, superposición de franjas, comando y cambio pendiente de zona horaria, alcance de 1a y 1b) y se suma la Sección 4 de la 1a. La Sección 4 de la 1b sigue pendiente.
 > Spec general: [`2026-10-07-backend-minutas-design.md`](2026-10-07-backend-minutas-design.md).
 
 ## Contexto
@@ -11,10 +13,10 @@ Al terminar la etapa 1, un local dado de alta por consola queda con su administr
 
 | Parte | Qué incluye | Queda funcionando |
 | --- | --- | --- |
-| **1a — Locales** | Agregado `Local` (datos, branding, modalidades, horarios, jornada, hora de corte, cierre manual, suspensión), imágenes, consola del owner para locales, `GET /api/v1/tiendas/{slug}` | Un local dado de alta por consola, con su tienda pública respondiendo si está abierta |
-| **1b — Identidad** | Usuarios, membresía (rol admin), login con Google, sesiones y logout, consola para admins y sesiones, panel del local | El admin se loguea y configura su local desde el panel |
+| **1a — Locales** | Agregado `Local` (datos, branding, modalidades, horarios, jornada, hora de corte, zona horaria, cierre manual, suspensión) con todos sus casos de uso, procesamiento y almacén de imágenes, consola del owner para locales, `GET /api/v1/tiendas/{slug}` y `GET /api/v1/imagenes/{nombre}` | Un local dado de alta por consola, con su tienda pública respondiendo si está abierta y cuándo abre |
+| **1b — Identidad** | Usuarios, membresía (rol admin), login con Google, sesiones y logout, consola para admins y sesiones, y los endpoints del panel del local sobre los casos de uso de la 1a | El admin se loguea y configura su local desde el panel |
 
-La 1a es dominio puro y de bajo riesgo; la 1b suma lo que depende de Google, cookies y despliegue.
+La 1a es dominio puro y de bajo riesgo; la 1b suma lo que depende de Google, cookies y despliegue. Los endpoints del panel (datos, horarios, cierre, imágenes) van en la 1b porque necesitan login: en la 1a los casos de uso del admin existen y se prueban, pero sin entrada HTTP.
 
 ## Decisiones tomadas
 
@@ -24,7 +26,7 @@ La 1a es dominio puro y de bajo riesgo; la 1b suma lo que depende de Google, coo
 | Horarios | Varias franjas por día, pueden cruzar medianoche, sin superponerse. El panel reemplaza la semana entera de una vez. Se guardan en una tabla propia, una fila por franja. | Una franja por día (no sirve a quien corta al mediodía); franjas por modalidad (se puede sumar después); `jsonb` dentro de `locales` (la base no ve el contenido). |
 | Hora de corte | Un cambio rige **desde la próxima jornada**: la jornada nunca retrocede. | Cambio inmediato: correr el corte para más tarde hace retroceder la jornada, reabre un "cerrar por hoy" y rompe la numeración de pedidos. |
 | Tiempo | Los instantes (sesiones, pedidos, cierres) se guardan en UTC; las franjas y la hora de corte, en hora local, con la zona horaria del local. | Todo en UTC: "abre a las 20:00" se correría sola si el país cambia de huso u horario de verano. |
-| Zona horaria | Una por local, por defecto `America/Argentina/Buenos_Aires`; solo la cambia el owner por consola. Hoy se opera solo en Argentina. | Sin campo: habría que migrar al salir del país. Editable en el panel: no hace falta hoy. |
+| Zona horaria | Una por local, por defecto `America/Argentina/Buenos_Aires`; la cambia solo el owner con `cambiar-zona-horaria`. Como la hora de corte, el cambio rige **desde la próxima jornada**. | Sin campo: habría que migrar al salir del país. Editable en el panel: no hace falta hoy. Cambio inmediato: pasar a una zona con menos horas hace retroceder la jornada. |
 | Logo y portada | Disco, detrás del puerto `AlmacenDeImagenes`, servidas por la API con caché permanente; S3 + CDN entra después como otro adaptador. Se re-codifican a WebP con tamaño máximo. | Guardar el original: puede traer el GPS de la foto y pesar de más. Servirlas desde el proxy: obliga a compartir disco entre servidores. |
 | Instancias | Una sola instancia de la API mientras las imágenes estén en disco. Antes de escalar, se pasa a S3. | — |
 | Login | Botón de Google en el panel; el backend verifica el ID token con `google-auth`. Solo entra quien el owner dio de alta. El primer login vincula la cuenta de Google (`sub`); los siguientes se buscan por `sub`. | Flujo con redirección y client secret: más código y un secreto que guardar. Identificar solo por email: el email de una cuenta de Google puede cambiar o reasignarse. |
@@ -32,6 +34,10 @@ La 1a es dominio puro y de bajo riesgo; la 1b suma lo que depende de Google, coo
 | Despliegue | Un solo dominio (`minutas.app`, provisorio) con un proxy que reparte por ruta: `/api/*` al backend, el resto al front. Front y back en servidores distintos. | Subdominios: obliga a configurar CORS y cualquier subdominio cuenta como "mismo sitio". Dominios distintos: la cookie `Lax` no viaja. |
 | Slug | Lo fija y lo cambia solo el owner por consola. 3 a 40 caracteres `a-z 0-9 -`, único, sin palabras reservadas (`api`, `panel`, `admin`…). | Que lo cambie el admin: rompería el link publicado en redes sin querer. |
 | Aislamiento | Toda escritura exige el local fijado en la transacción, sin excepción. La única lectura sin local fijado es la de `locales`, para resolver el slug. | `locales` sin RLS: un descuido permitiría que un local escriba datos de otro. |
+| Concurrencia | Bloqueo optimista del `Local`: columna `version`; si otro lo guardó desde que se leyó, `409 local_modificado_en_paralelo` y se recarga. | Bloqueo pesimista (`FOR UPDATE`): una lectura especial por repositorio. Nada: una edición del panel podía revertir una suspensión hecha al mismo tiempo. |
+| WhatsApp | Se interpreta con `phonenumbers` (Argentina por defecto), tiene que ser un celular y se guarda en el formato de WhatsApp (`549…`). | Regex genérico: acepta números con los que el link `wa.me` no funciona. Exigir el formato final: el admin no sabe quitar el 0 y el 15. |
+| Próxima apertura | La calcula el dominio y la devuelve la tienda pública. | Calcularla en el front: no conoce el cierre manual y anunciaría una apertura que no va a pasar. |
+| Superposición de franjas | La controla solo el dominio (`Horario`). | Restricción de exclusión en la base: extensión, `multirange` y restricción diferida para un camino de escritura que no existe. Se agrega si aparece otro. |
 | Suspensión | El local está activo o suspendido; lo cambia el owner por consola cuando ve que el abono no entró. Suspendido: la tienda figura "no disponible" sin decir por qué; el admin entra pero solo ve el aviso y no puede modificar nada. Los datos no se tocan. | Cobro automático: el cobro sigue fuera del sistema. Si se suma, solo cambia quién suspende el local. |
 
 ## Sección 1: módulos y responsabilidades
@@ -40,10 +46,11 @@ El backend suma dos módulos independientes, Identidad y Locales, que la API web
 
 - **Identidad** no importa nada de Locales: cuando da de alta un admin, consulta que el local exista a través de un puerto.
 - **El reloj es un puerto**, así horarios, jornadas y vencimientos se prueban con una hora fija.
+- **La raíz de composición** (`minutas/composicion.py`) arma los adaptadores (`Servicios`) y los casos de uso listos para usar (`CasosDeUso`); la API y la consola solo ejecutan `casos.<caso>.ejecutar(...)`.
 - **Dos unidades de trabajo:**
   - **Del local** (fija `app.local_id`): el agregado `Local` completo (fila de `locales` y sus franjas), y después la carta y los pedidos.
   - **De plataforma** (sin local fijado): usuarios, sesiones y la resolución del slug.
-- **La consola del owner tiene seis comandos:** alta de local, alta de admin, cambio de slug, revocar sesiones, suspender local y reactivar local. Todo comando que toca un local fija ese local; en el alta, el id se genera en el dominio y se fija antes del `INSERT`. Cada comando queda registrado en el log.
+- **La consola del owner tiene siete comandos:** alta de local, alta de admin, cambio de slug, cambio de zona horaria, revocar sesiones, suspender local y reactivar local. Todo comando que toca un local fija ese local; en el alta, el id se genera en el dominio y se fija antes del `INSERT`. Cada comando queda registrado en el log.
 
 ## Sección 2: el dominio de Locales
 
@@ -56,13 +63,14 @@ Todo el comportamiento del local vive en el agregado `Local`, que recibe la hora
 | Nombre | 1 a 80 caracteres |
 | Descripción | Hasta 500 caracteres, opcional |
 | Dirección | Opcional |
-| WhatsApp | Formato internacional, solo dígitos (ej. `5493511234567`) |
+| WhatsApp | Se acepta como lo escribe una persona (`0351 15 123-4567`, `+54 9 351…`); se interpreta con `phonenumbers` (región AR), tiene que ser celular y se guarda en formato WhatsApp (`5493511234567`) |
 | Color | `#RRGGBB` |
 | Modalidades | Delivery, retiro o ambas; nunca ninguna |
-| Zona horaria | Por defecto `America/Argentina/Buenos_Aires`; solo por consola |
+| Zona horaria | IANA; por defecto `America/Argentina/Buenos_Aires`; solo por consola, rige desde la próxima jornada |
 | Hora de corte | Por defecto 06:00 |
 | Logo y portada | Opcionales; se guarda el nombre del archivo |
 | Estado | Activo o suspendido; solo lo cambia el owner por consola |
+| Versión | Número para el bloqueo optimista; lo incrementa el repositorio al guardar |
 
 ### Horarios
 
@@ -80,7 +88,7 @@ Tres objetos de valor:
   - `asegurar_respeta_corte(hora_de_corte)`: ninguna franja corta ninguna de las siete horas de corte de la semana. Así una jornada nunca se mete en la siguiente, crucen o no la medianoche.
   - Una semana sin franjas es válida: el local está siempre cerrado hasta que cargue horarios.
 
-### Jornada y hora de corte
+### Jornada, hora de corte y zona horaria
 
 La jornada es el "día de trabajo" del local y termina en la hora de corte, no a la medianoche:
 
@@ -88,20 +96,22 @@ La jornada es el "día de trabajo" del local y termina en la hora de corte, no a
 
 Con corte a las 06:00, el sábado a las 02:00 sigue siendo la jornada del viernes; el sábado a las 06:00 empieza la del sábado. La misma regla numera los pedidos en la etapa 3.
 
-**La hora de corte tiene dos variantes**, con el mismo método `jornada_de(ahora, zona_horaria)`:
+Lo que define la jornada es el par **reglas de jornada** = (zona horaria, hora de corte), un objeto de valor `ReglasDeJornada(zona, corte)`. Cambiar la zona o el corte tiene el mismo problema (la jornada podría retroceder), así que los dos cambian por el mismo mecanismo. Hay dos variantes, con los métodos `jornada_de(ahora)` y `zona_en(ahora)`:
 
-- **`CorteFijo(hora)`:** calcula la jornada con la fórmula de arriba.
-- **`CorteConCambioPendiente(vigente, pendiente, desde_jornada)`:** `desde_jornada` es la jornada en la que empieza a regir el corte nuevo, siempre la jornada actual + 1.
-  - Antes del corte vigente que da inicio a `desde_jornada`, calcula con el vigente.
-  - Desde ese momento, calcula con el pendiente, sin bajar nunca de `desde_jornada`.
+- **`JornadaFija(reglas)`:** calcula la jornada con la fórmula de arriba y la zona de sus reglas.
+- **`JornadaConCambioPendiente(vigentes, pendientes, desde_jornada)`:** `desde_jornada` es la jornada en la que empiezan a regir las reglas nuevas, siempre la jornada actual + 1.
+  - Antes del instante en que empieza `desde_jornada` según las reglas vigentes, calcula con las vigentes.
+  - Desde ese instante, calcula con las pendientes, sin bajar nunca de `desde_jornada`. `zona_en(ahora)` devuelve la zona que rige en ese instante: las franjas pasan a la zona nueva en el mismo momento que la jornada.
 
-Cambiar el corte desde un `CorteFijo` crea un `CorteConCambioPendiente`. Las reglas:
+Cambiar el corte (`cambiar_hora_de_corte`) o la zona (`cambiar_zona_horaria`) desde una `JornadaFija` crea una `JornadaConCambioPendiente`. Las reglas:
 
 - La jornada de transición puede durar más o menos de 24 h.
-- Un segundo cambio el mismo día reemplaza al pendiente; no se acumulan.
-- No hace falta ningún proceso: cuando el cambio ya rige, la próxima modificación del local lo convierte en `CorteFijo(pendiente)`.
+- Un segundo cambio el mismo día reemplaza al pendiente, combinado con él: cambiar el corte y después la zona deja pendientes los dos. No se acumulan transiciones.
+- No hace falta ningún proceso: cuando el cambio ya rige, la próxima modificación del local lo convierte en `JornadaFija(pendientes)`.
 - Mientras haya un pendiente, las franjas se validan contra los dos cortes. El `Local` valida las franjas tanto al reemplazarlas como al cambiar el corte.
-- El panel muestra desde cuándo rige el corte nuevo.
+- El panel muestra desde cuándo rigen las reglas nuevas.
+
+Ejemplo: un local en Buenos Aires (UTC−3) con corte 06:00 pasa a `America/Santiago` (UTC−4 en invierno) un sábado a las 06:30 de Buenos Aires. Si rigiera al instante, en Santiago serían las 05:30 y la jornada volvería al viernes. Con el cambio pendiente, el sábado sigue en Buenos Aires y el domingo empieza a las 06:00 de Santiago: la jornada de transición dura 25 h.
 
 ### Cierre manual
 
@@ -117,7 +127,7 @@ Tres variantes con el mismo método `permite_abrir(jornada)`:
 - **"Cerrar hasta nuevo aviso"** vale hasta que alguien toque "reabrir".
 - **"Reabrir"** reemplaza cualquiera de los dos por `SinCierre`.
 - Un cambio de hora de corte no acorta ni alarga un cierre ya hecho, porque rige recién desde la próxima jornada.
-- Un cambio de zona horaria tampoco lo afecta: los instantes están en UTC y las franjas en hora local.
+- Un cambio de zona horaria tampoco lo afecta, por la misma razón: rige desde la próxima jornada.
 
 ### Suspensión
 
@@ -128,7 +138,7 @@ El estado tiene dos variantes:
 | `Activo` | `True` | No hace nada |
 | `Suspendido` | `False` | Lanza `LocalSuspendido` (403) |
 
-Todo comando del panel sobre el `Local` empieza llamando a `self._estado.asegurar_modificable()`; así la regla de suspensión vive en un solo lugar y sin `if`. Los comandos de la consola (suspender, reactivar, cambiar slug) no la llaman.
+Todo comando del panel sobre el `Local` empieza llamando a `self._estado.asegurar_modificable()`; así la regla de suspensión vive en un solo lugar y sin `if`. Los comandos de la consola (suspender, reactivar, cambiar slug, cambiar zona horaria) no la llaman.
 
 - Un local suspendido está cerrado siempre, sin importar horarios ni cierre manual.
 - La tienda pública responde solo que no está disponible y rechaza pedidos, sin mostrar el motivo.
@@ -142,8 +152,8 @@ El `Local` no pregunta nada: cada parte contesta la suya y el resultado es la co
 ```python
 class Local:
     def esta_abierto(self, ahora: datetime) -> bool:
-        jornada = self._hora_de_corte.jornada_de(ahora, self._zona_horaria)
-        momento = MomentoDeLaSemana.desde_instante(ahora, self._zona_horaria)
+        jornada = self._jornada.jornada_de(ahora)
+        momento = MomentoDeLaSemana.desde_instante(ahora, self._jornada.zona_en(ahora))
         return (
             self._estado.permite_abrir()
             and self._cierre_manual.permite_abrir(jornada)
@@ -154,6 +164,14 @@ class Local:
 1. El estado: un local suspendido no abre.
 2. El cierre manual: no abre si hay un cierre vigente para esta jornada.
 3. El horario: abre si alguna franja contiene el momento actual, pasado a la zona del local.
+
+### Próxima apertura
+
+`Local.proxima_apertura(ahora) -> datetime | None` (instante UTC):
+
+- `None` si está abierto ahora, suspendido, cerrado hasta nuevo aviso o sin franjas.
+- Si no, recorre los inicios de franja de los próximos 7 días en orden, en la zona que rija en cada instante, y devuelve el primero en el que el local abriría: con un "cerrar por hoy", saltea los inicios que caen en la jornada cerrada.
+- La responde cada parte, como `esta_abierto`: el estado y el cierre deciden si una apertura cuenta y el horario dice cuándo empiezan las franjas.
 
 ### Condicionales en el dominio
 
@@ -171,16 +189,19 @@ El dominio no tiene ningún `if` que elija comportamiento: las variantes son cla
 | `slug` | `text` UNIQUE | |
 | `nombre`, `descripcion`, `direccion`, `whatsapp`, `color` | `text` | |
 | `ofrece_delivery`, `ofrece_retiro` | `boolean` | `CHECK (ofrece_delivery OR ofrece_retiro)` |
-| `zona_horaria` | `text` | |
+| `zona_horaria` | `text` | Vigente |
 | `hora_de_corte` | `time` | Vigente |
-| `hora_de_corte_pendiente`, `hora_de_corte_desde_jornada` | `time`, `date` | Nulos juntos o no nulos juntos |
+| `zona_horaria_pendiente`, `hora_de_corte_pendiente`, `reglas_desde_jornada` | `text`, `time`, `date` | Nulos juntos o no nulos juntos |
 | `cierre_manual` | `text NULL` | `por_jornada` o `hasta_nuevo_aviso` |
 | `cierre_manual_jornada` | `date NULL` | No nulo solo si el cierre es `por_jornada` |
 | `logo`, `portada` | `text NULL` | Nombre de la imagen |
 | `estado` | `text` | `activo` o `suspendido` |
+| `version` | `integer` | Bloqueo optimista |
 | `creado_en`, `actualizado_en` | `timestamptz` | UTC |
 
-**`franjas_horarias`** (RLS completo): `id`, `local_id`, `dia` (0 a 6), `apertura`, `cierre` (`time`). Reemplazar el horario borra y vuelve a insertar las franjas del local en la misma transacción que actualiza `locales`.
+**`franjas_horarias`** (RLS completo): `id`, `local_id`, `dia` (0 a 6), `apertura`, `cierre` (`time`). Reemplazar el horario borra y vuelve a insertar las franjas del local en la misma transacción que actualiza `locales`. La no superposición la garantiza el dominio; la base no la controla (ver Decisiones tomadas).
+
+**Guardar el `Local`** actualiza `locales` con `WHERE id = :id AND version = :version_leida` y suma uno a la versión. Si no actualizó exactamente una fila, lanza `LocalModificadoEnParalelo` (409) y no toca las franjas.
 
 **`usuarios`** (plataforma, sin RLS): `id`, `email` UNIQUE (en minúsculas), `google_sub` UNIQUE NULL, `creado_en`.
 
@@ -272,25 +293,64 @@ minutas.app/{slug}    → front de la tienda
 - El volumen entra en los backups junto con la base.
 - Dependencias nuevas: `pillow`, `python-multipart`.
 
+## Sección 4 (1a): entradas, errores y pruebas
+
+### HTTP
+
+Todo bajo `/api/v1`, con errores en `problem+json` como en la etapa 0.
+
+| Ruta | Respuesta |
+| --- | --- |
+| `GET /tiendas/{slug}` | `200`: `slug`, `nombre`, `descripcion`, `direccion`, `whatsapp`, `color`, `modalidades`, `zona_horaria`, `horarios` (franjas en hora local), `logo_url`, `portada_url`, `abierto_ahora`, `proxima_apertura` (UTC o `null`) y `disponible: true`. Suspendido: `200 {slug, disponible: false}`. Inexistente: `404 local_no_encontrado` |
+| `GET /imagenes/{nombre}` | El archivo WebP con `Cache-Control: public, max-age=31536000, immutable`. El nombre se valida (`<uuid>.webp`) antes de tocar el disco |
+
+La tienda: la unidad de plataforma resuelve el slug a un `local_id` y la unidad del local carga el `Local` con sus franjas; las dos son de solo lectura. La hora se lee del `Reloj` una vez por solicitud y los casos de uso la reciben como `ahora`.
+
+### Consola de la 1a
+
+| Comando | Argumentos |
+| --- | --- |
+| `alta-local` | `--slug --nombre --whatsapp [--modalidades delivery,retiro]` |
+| `cambiar-slug` | `--slug --nuevo` |
+| `cambiar-zona-horaria` | `--slug --zona` |
+| `suspender-local` | `--slug` |
+| `reactivar-local` | `--slug` |
+
+`alta-admin` y `revocar-sesiones` entran en la 1b. Cada comando resuelve el local por slug y lo fija antes de escribir (en el alta, el id se genera en el dominio y se fija antes del `INSERT`), queda registrado en el log y sale con 0, con 1 ante un error de dominio (mensaje por `stderr`) o con 2 ante un uso incorrecto.
+
+### Casos de uso de la 1a
+
+Del owner: `DarDeAltaLocal`, `CambiarSlug`, `CambiarZonaHoraria`, `SuspenderLocal`, `ReactivarLocal`. Públicos: `ObtenerTienda`. Del admin, sin entrada HTTP hasta la 1b: `ActualizarDatosDelLocal`, `CambiarHoraDeCorte`, `ReemplazarHorario`, `CerrarManualmente`, `Reabrir`, `SubirImagenDelLocal`, `ObtenerLocalDelPanel`.
+
+### Pruebas de la 1a
+
+- **Dominio:** `MomentoDeLaSemana` (vuelta del domingo al lunes); `FranjaHoraria` (`contiene`, `se_superpone_con`, `corta` y sus bordes); `Horario` y el respeto de la hora de corte; la jornada con reglas fijas, con cambio pendiente de corte y de zona (Buenos Aires a Santiago), que nunca retrocede y donde un segundo cambio reemplaza al pendiente; las variantes de cierre y de estado; `esta_abierto` y `proxima_apertura` con una tabla de casos; el WhatsApp con varias formas de escribirlo y un fijo que se rechaza; el procesamiento de imágenes (formato falso, bomba de descompresión, orientación EXIF, tamaño máximo, salida WebP sin metadatos).
+- **Casos de uso:** con dobles en memoria que reproducen el bloqueo optimista y un reloj fijo.
+- **Integración** (PostgreSQL real): las políticas de `locales` (se lee sin local fijado, no se escribe sin local ni con el de otro, no se borra); el RLS de `franjas_horarias`; el repositorio guarda y lee el agregado completo con sus franjas; el bloqueo optimista (una suspensión durante otra edición no se pierde); la migración y `alembic check`; y una prueba de punta a punta: alta por consola, horarios cargados por caso de uso y tienda abierta por HTTP.
+- **Consola:** los cinco comandos y sus errores.
+
+### Pendientes de la etapa 0 que entran en la 1a
+
+`SecretStr` para las URLs de conexión, logs de uvicorn en JSON, `cast` en lugar de los `# type: ignore` de los tests, un job de CI que levante Compose y `--proxy-headers` en el arranque de uvicorn.
+
 ## Errores
 
 | Error | Respuesta |
 | --- | --- |
-| Slug inválido, horarios superpuestos, franja ambigua o que corta la hora de corte, zona horaria o WhatsApp inválidos | 422 `regla_de_negocio_incumplida` (cada uno con su código) |
+| `slug_invalido`, `slug_reservado`, `whatsapp_invalido`, `zona_horaria_invalida`, `franja_ambigua`, `horarios_superpuestos`, `franja_corta_la_hora_de_corte`, `dato_del_local_invalido` | 422 (categoría `ReglaDeNegocioIncumplida`) |
 | `imagen_invalida`, `imagen_demasiado_grande` | 422 |
-| Slug en uso | 409 |
-| Local no encontrado | 404 |
+| `slug_en_uso`, `local_modificado_en_paralelo` | 409 |
+| `local_no_encontrado` | 404 |
 | `token_invalido`, `sesion_requerida` | 401 |
 | `usuario_no_habilitado`, `local_suspendido`, `origen_no_permitido` | 403 |
 
-**Cambio pendiente en el código (decidido, sin implementar):** sumar las categorías `NoAutenticado` (401) y `AccesoDenegado` (403) en `compartido/dominio/errores.py`, con su entrada en `ESTADOS_POR_CATEGORIA`.
+Las categorías `NoAutenticado` (401) y `AccesoDenegado` (403) se suman en `compartido/dominio/errores.py`, con su entrada en `ESTADOS_POR_CATEGORIA`, ya en la 1a: `LocalSuspendido` es un `AccesoDenegado`.
 
 ## Pendientes
 
-1. **Políticas de `membresias`:** en el login hay que leerla antes de saber el local. Propuesta a confirmar: el mismo esquema que `locales` (lectura abierta, escritura con el local fijado).
-2. **Restricción de exclusión en `franjas_horarias`** (rango de minutos de la semana con `EXCLUDE USING gist`), como red extra en la base. Opcional; la regla vive en el dominio.
-3. **La regla exacta del WhatsApp:** largo y prefijo `549` para celulares argentinos.
-4. **"Abre a las 20:00":** que `GET /tiendas/{slug}` devuelva la próxima apertura.
-5. **`nonce` en el login con Google:** fuera del MVP, queda como mejora.
-6. **Sección 4:** los endpoints de la etapa con sus cuerpos de request y response, y el plan de pruebas.
-7. **Plan de implementación** de 1a y 1b.
+Resueltos el 2026-11-13 (ver Decisiones tomadas): restricción de exclusión (no va), regla del WhatsApp, próxima apertura y Sección 4 de la 1a.
+
+1. **Políticas de `membresias`** (1b): en el login hay que leerla antes de saber el local. Propuesta a confirmar: el mismo esquema que `locales` (lectura abierta, escritura con el local fijado).
+2. **`nonce` en el login con Google** (1b): fuera del MVP, queda como mejora.
+3. **Sección 4 de la 1b:** endpoints del panel y de auth con sus cuerpos, y sus pruebas.
+4. **Plan de implementación** de la 1a; después, el de la 1b.

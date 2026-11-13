@@ -4,7 +4,7 @@
 
 > Versión exportada del doc colaborativo [Spec backend — Minutas](https://claude.ai/code/artifact/a10170a2-6af5-400b-8901-763c27b3c263).
 >
-> **Actualizada el 2026-11-03** con las decisiones del diseño de la etapa 1 ([`2026-11-03-etapa-1-identidad-y-locales-design.md`](2026-11-03-etapa-1-identidad-y-locales-design.md)): RLS por operación en `locales`, instantes en UTC y horas de reloj en hora local, login vinculado por `sub`, cookie `__Host-`, despliegue con proxy en un solo dominio, imágenes servidas por la API, errores 401 y 403, y la etapa 1 partida en 1a y 1b.
+> **Actualizada el 2026-11-03** con las decisiones del diseño de la etapa 1 ([`2026-11-03-etapa-1-identidad-y-locales-design.md`](2026-11-03-etapa-1-identidad-y-locales-design.md)): RLS por operación en `locales`, instantes en UTC y horas de reloj en hora local, login vinculado por `sub`, cookie `__Host-`, despliegue con proxy en un solo dominio, imágenes servidas por la API, errores 401 y 403, y la etapa 1 partida en 1a y 1b. **Y el 2026-11-13**: bloqueo optimista del `Local`, WhatsApp normalizado con `phonenumbers`, zona horaria por local que cambia desde la próxima jornada y próxima apertura en la tienda.
 
 ## Contexto y objetivo
 
@@ -271,7 +271,7 @@ El backend se entrega en etapas verticales (la 1 partida en dos), en orden de de
 | # | Etapa | Qué incluye | Queda funcionando |
 | --- | --- | --- | --- |
 | 0 | Fundaciones | Paquetes por contexto, Docker Compose, configuración por entorno, roles de base, Alembic, unidad de trabajo con `SET LOCAL app.local_id`, base de RLS, UUIDv7, errores `problem+json`, logs, `pytest`, `ruff` y `mypy` | La API arranca, migra y tiene el aislamiento probado con una tabla de ejemplo |
-| 1a | Locales | Agregado `Local`, horarios, jornada con hora de corte, cierre manual, suspensión, almacenamiento de imágenes, CLI de locales, `GET /tiendas/{slug}` | Un local dado de alta por CLI, con su tienda respondiendo si está abierta |
+| 1a | Locales | Agregado `Local` con bloqueo optimista, horarios, jornada con hora de corte y zona horaria (los cambios rigen desde la próxima jornada), cierre manual, suspensión, procesamiento y almacenamiento de imágenes, CLI de locales, `GET /tiendas/{slug}` con próxima apertura | Un local dado de alta por CLI, con su tienda respondiendo si está abierta y cuándo abre |
 | 1b | Identidad | Usuarios, membresía, login con Google, sesiones, CLI de admins y sesiones, `/panel/local` | El admin del local logueado y configurándolo |
 | 2 | Carta | Categorías ordenables, productos con grupos y opciones, sin stock, foto, borrado lógico, `GET /tiendas/{slug}/carta` | El admin carga la carta y la tienda la muestra |
 | 3 | Pedidos: checkout | Confirmación del pedido, validación contra Carta y Locales, copia de precios, numeración por jornada, link `wa.me`, límite de 5 pedidos cada 15 minutos por IP, pantalla de pedido enviado | Un cliente confirma un pedido real |
