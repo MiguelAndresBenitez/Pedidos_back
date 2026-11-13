@@ -12,6 +12,7 @@ from minutas.compartido.dominio.errores import (
     ReglaDeNegocioIncumplida,
 )
 from minutas.compartido.infraestructura.configuracion import Configuracion
+from soporte.servicios_en_memoria import ServiciosEnMemoria
 
 
 class TiendaCerrada(ReglaDeNegocioIncumplida):
@@ -19,8 +20,8 @@ class TiendaCerrada(ReglaDeNegocioIncumplida):
 
 
 @pytest.fixture
-def app(configuracion: Configuracion) -> FastAPI:
-    app = crear_app(configuracion)
+def app(configuracion: Configuracion, memoria: ServiciosEnMemoria) -> FastAPI:
+    app = crear_app(configuracion, memoria.servicios)
     errores: dict[str, Exception] = {
         "tienda-cerrada": TiendaCerrada("La tienda está cerrada"),
         "no-encontrado": NoEncontrado("No existe"),
