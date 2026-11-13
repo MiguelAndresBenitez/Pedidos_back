@@ -1,4 +1,5 @@
 import pytest
+from structlog.testing import capture_logs
 
 from minutas.cli.__main__ import correr
 from minutas.locales.dominio.estado_del_local import Activo, Suspendido
@@ -93,3 +94,19 @@ async def test_comando_desconocido_termina_con_error_de_uso(memoria: ServiciosEn
         await correr(["alta-admin"], memoria.servicios)
 
     assert salida.value.code == 2
+
+
+@pytest.mark.parametrize("whatsapp", ["0351 15 512-3456", "12345"])
+async def test_el_whatsapp_no_llega_al_log_de_la_consola(
+    memoria: ServiciosEnMemoria, capsys: pytest.CaptureFixture[str], whatsapp: str
+) -> None:
+    argv = ["alta-local", "--slug", "la-esquina", "--nombre", "La Esquina", "--whatsapp", whatsapp]
+
+    with capture_logs() as eventos:
+        await correr(argv, memoria.servicios)
+
+    capsys.readouterr()
+    assert eventos
+    digitos = "".join(c for c in whatsapp if c.isdigit())
+    assert digitos not in str(eventos)
+    assert "5493515123456" not in str(eventos)
