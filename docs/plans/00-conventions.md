@@ -57,6 +57,8 @@ Todo el código va en español: clases, métodos, variables, tests, tablas, colu
 | Tabla de despacho (dict) | Elegir comportamiento según tipo, sin `if` encadenados | `ESTADOS_POR_CATEGORIA` en `api/errores_http.py` |
 | Polimorfismo por variantes | Una parte de una entidad se comporta distinto según lo que es, sin transiciones con reglas | `Activo`/`Suspendido`, `SinCierre`/`CierrePorJornada`/`CierreHastaNuevoAviso` (etapa 1a) |
 | State | Máquina de estados con transiciones y reglas | Estados de `Pedido` (etapa 4) |
+| Bloqueo optimista | Un agregado que pueden modificar varios actores a la vez | `Local.version`: el repositorio guarda con `WHERE version = :leida`, suma uno y lanza `LocalModificadoEnParalelo` (`Conflicto`, 409) si no actualizó una fila |
+| Raíz de composición con casos de uso armados | La API y la consola necesitan los mismos casos de uso | `minutas/composicion.py`: `Servicios` (adaptadores) y `CasosDeUso` (casos de uso ya cableados); las entradas solo hacen `casos.<caso>.ejecutar(...)` |
 
 ## Requisitos de detalle
 
@@ -127,3 +129,4 @@ self._estado.asegurar_modificable()   # Activo no hace nada; Suspendido lanza Lo
 | 2026-10-28 | Las tareas de configuración se verifican con comandos en lugar de TDD | No tienen lógica que testear | Etapa 0: 00, 02, 14 |
 | 2026-10-28 | `tests/soporte/` con `pythonpath = ["tests"]` para tipar fixtures; marca `integracion`; SQL como constantes `text(...)`; alcances de commit fijos | Extracción tras 10 tareas, aprobada por el usuario | Etapa 0: 01, 09, 10, 12, 13 |
 | 2026-11-03 | Condicionales: se prohíbe el `if` que elige comportamiento, no el patrón; variantes por polimorfismo y State solo para máquinas de estados reales. Se permiten guard clauses y expresiones booleanas | "Usar State" obligaba al patrón completo donde no hay transiciones (por ejemplo, "abierto ahora"); aprobado por el usuario | Etapa 1 en adelante |
+| 2026-11-13 | Bloqueo optimista para agregados con varios actores y raíz de composición con `CasosDeUso` | Decisiones del diseño de la etapa 1a, aprobadas por el usuario | Etapa 1a en adelante |
