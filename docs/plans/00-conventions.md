@@ -109,7 +109,7 @@ if self._estado == "suspendido":
     raise LocalSuspendido(...)
 
 # Bien: el estado responde
-self._estado.asegurar_modificable()   # Activo no hace nada; Suspendido lanza LocalSuspendido
+self._estado.asegurar_modificable()  # Activo no hace nada; Suspendido lanza LocalSuspendido
 ```
 
 ### Condicionales permitidos
