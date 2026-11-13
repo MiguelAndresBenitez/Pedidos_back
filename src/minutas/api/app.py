@@ -8,6 +8,7 @@ from fastapi import FastAPI
 from minutas import __version__
 from minutas.api.errores_http import registrar_manejadores_de_errores
 from minutas.api.middleware_de_solicitud import MiddlewareDeSolicitud
+from minutas.api.rutas_de_imagenes import router_de_imagenes
 from minutas.api.rutas_de_tiendas import router_de_tiendas
 from minutas.api.salud import router_de_salud
 from minutas.compartido.infraestructura.configuracion import Configuracion
@@ -30,6 +31,7 @@ def crear_app(configuracion: Configuracion, servicios: Servicios) -> FastAPI:
     app.add_middleware(MiddlewareDeSolicitud)
     app.include_router(router_de_salud)
     app.include_router(router_de_tiendas)
+    app.include_router(router_de_imagenes)
     registrar_manejadores_de_errores(app)
     return app
 
