@@ -23,28 +23,28 @@
 
 | # | Tarea | Archivo | Estado |
 |---|-------|---------|--------|
-| 1 | Dependencias y configuración | [01-dependencias-y-configuracion.md](01-dependencias-y-configuracion.md) | Pendiente |
-| 2 | Categorías de error 401 y 403 | [02-errores-401-y-403.md](02-errores-401-y-403.md) | Pendiente |
-| 3 | Reloj y unidad de trabajo de plataforma | [03-reloj-y-unidad-de-plataforma.md](03-reloj-y-unidad-de-plataforma.md) | Pendiente |
-| 4 | Errores y valores del local | [04-valores-del-local.md](04-valores-del-local.md) | Pendiente |
-| 5 | Momento de la semana, franjas y horario | [05-horario.md](05-horario.md) | Pendiente |
-| 6 | Reglas de jornada y cambios pendientes | [06-jornada.md](06-jornada.md) | Pendiente |
-| 7 | Cierre manual y estado del local | [07-cierre-y-estado.md](07-cierre-y-estado.md) | Pendiente |
-| 8 | Tipos, medidas y nombre de imagen | [08-imagen.md](08-imagen.md) | Pendiente |
-| 9 | Agregado Local | [09-agregado-local.md](09-agregado-local.md) | Pendiente |
-| 10 | Próxima apertura | [10-proxima-apertura.md](10-proxima-apertura.md) | Pendiente |
-| 11 | Puertos, unidades de trabajo y casos de uso del owner | [11-casos-de-uso-del-owner.md](11-casos-de-uso-del-owner.md) | Pendiente |
-| 12 | Casos de uso del panel del admin | [12-casos-de-uso-del-panel.md](12-casos-de-uso-del-panel.md) | Pendiente |
-| 13 | Tablas, migración 0002 y políticas de RLS | [13-tablas-y-migracion.md](13-tablas-y-migracion.md) | Pendiente |
-| 14 | Repositorio, directorio y unidades de trabajo sobre SQLAlchemy | [14-repositorio-y-directorio.md](14-repositorio-y-directorio.md) | Pendiente |
-| 15 | Procesador de imágenes y almacén en disco | [15-procesador-y-almacen.md](15-procesador-y-almacen.md) | Pendiente |
-| 16 | Raíz de composición y fábrica de la app | [16-composicion-y-app.md](16-composicion-y-app.md) | Pendiente |
-| 17 | Tienda pública | [17-tienda-publica.md](17-tienda-publica.md) | Pendiente |
-| 18 | Imágenes servidas por la API | [18-imagenes-por-http.md](18-imagenes-por-http.md) | Pendiente |
-| 19 | Consola del owner | [19-consola-del-owner.md](19-consola-del-owner.md) | Pendiente |
-| 20 | Prueba de punta a punta de la 1a | [20-punta-a-punta.md](20-punta-a-punta.md) | Pendiente |
-| 21 | Logs de uvicorn en JSON y tipos sin ignore | [21-logs-de-uvicorn-y-tipos.md](21-logs-de-uvicorn-y-tipos.md) | Pendiente |
-| 22 | Volumen de imágenes, proxy, CI con Compose y README | [22-docker-ci-y-readme.md](22-docker-ci-y-readme.md) | Pendiente |
+| 1 | Dependencias y configuración | [01-dependencias-y-configuracion.md](01-dependencias-y-configuracion.md) | Hecha |
+| 2 | Categorías de error 401 y 403 | [02-errores-401-y-403.md](02-errores-401-y-403.md) | Hecha |
+| 3 | Reloj y unidad de trabajo de plataforma | [03-reloj-y-unidad-de-plataforma.md](03-reloj-y-unidad-de-plataforma.md) | Hecha |
+| 4 | Errores y valores del local | [04-valores-del-local.md](04-valores-del-local.md) | Hecha |
+| 5 | Momento de la semana, franjas y horario | [05-horario.md](05-horario.md) | Hecha |
+| 6 | Reglas de jornada y cambios pendientes | [06-jornada.md](06-jornada.md) | Hecha |
+| 7 | Cierre manual y estado del local | [07-cierre-y-estado.md](07-cierre-y-estado.md) | Hecha |
+| 8 | Tipos, medidas y nombre de imagen | [08-imagen.md](08-imagen.md) | Hecha |
+| 9 | Agregado Local | [09-agregado-local.md](09-agregado-local.md) | Hecha |
+| 10 | Próxima apertura | [10-proxima-apertura.md](10-proxima-apertura.md) | Hecha |
+| 11 | Puertos, unidades de trabajo y casos de uso del owner | [11-casos-de-uso-del-owner.md](11-casos-de-uso-del-owner.md) | Hecha |
+| 12 | Casos de uso del panel del admin | [12-casos-de-uso-del-panel.md](12-casos-de-uso-del-panel.md) | Hecha |
+| 13 | Tablas, migración 0002 y políticas de RLS | [13-tablas-y-migracion.md](13-tablas-y-migracion.md) | Hecha |
+| 14 | Repositorio, directorio y unidades de trabajo sobre SQLAlchemy | [14-repositorio-y-directorio.md](14-repositorio-y-directorio.md) | Hecha |
+| 15 | Procesador de imágenes y almacén en disco | [15-procesador-y-almacen.md](15-procesador-y-almacen.md) | Hecha |
+| 16 | Raíz de composición y fábrica de la app | [16-composicion-y-app.md](16-composicion-y-app.md) | Hecha |
+| 17 | Tienda pública | [17-tienda-publica.md](17-tienda-publica.md) | Hecha |
+| 18 | Imágenes servidas por la API | [18-imagenes-por-http.md](18-imagenes-por-http.md) | Hecha |
+| 19 | Consola del owner | [19-consola-del-owner.md](19-consola-del-owner.md) | Hecha |
+| 20 | Prueba de punta a punta de la 1a | [20-punta-a-punta.md](20-punta-a-punta.md) | Hecha |
+| 21 | Logs de uvicorn en JSON y tipos sin ignore | [21-logs-de-uvicorn-y-tipos.md](21-logs-de-uvicorn-y-tipos.md) | Hecha |
+| 22 | Volumen de imágenes, proxy, CI con Compose y README | [22-docker-ci-y-readme.md](22-docker-ci-y-readme.md) | Hecha |
 
 ## Dependencias
 
