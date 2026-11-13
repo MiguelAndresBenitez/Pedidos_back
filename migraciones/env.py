@@ -11,7 +11,7 @@ from minutas.compartido.infraestructura.configuracion import ConfiguracionDeMigr
 
 def obtener_url() -> str:
     url = context.config.get_main_option("sqlalchemy.url")
-    return url or ConfiguracionDeMigraciones().url_base_de_datos_migraciones
+    return url or ConfiguracionDeMigraciones().url_base_de_datos_migraciones.get_secret_value()
 
 
 def ejecutar_migraciones(conexion: Connection) -> None:

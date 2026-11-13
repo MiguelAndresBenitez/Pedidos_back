@@ -1,3 +1,5 @@
+from pathlib import Path
+
 import pytest
 from pydantic import ValidationError
 
@@ -8,14 +10,19 @@ from minutas.compartido.infraestructura.configuracion import (
 
 URL_APP = "postgresql+asyncpg://minutas_app:clave@db:5432/minutas"
 URL_OWNER = "postgresql+asyncpg://minutas_owner:clave@db:5432/minutas"
+VARIABLES = (
+    "URL_BASE_DE_DATOS",
+    "URL_BASE_DE_DATOS_MIGRACIONES",
+    "NIVEL_DE_REGISTRO",
+    "ENTORNO",
+    "DIRECTORIO_DE_IMAGENES",
+)
 
 
 @pytest.fixture(autouse=True)
 def entorno_vacio(monkeypatch: pytest.MonkeyPatch) -> None:
-    monkeypatch.delenv("MINUTAS_URL_BASE_DE_DATOS", raising=False)
-    monkeypatch.delenv("MINUTAS_URL_BASE_DE_DATOS_MIGRACIONES", raising=False)
-    monkeypatch.delenv("MINUTAS_NIVEL_DE_REGISTRO", raising=False)
-    monkeypatch.delenv("MINUTAS_ENTORNO", raising=False)
+    for variable in VARIABLES:
+        monkeypatch.delenv(f"MINUTAS_{variable}", raising=False)
 
 
 def test_configuracion_lee_variables_con_prefijo_minutas(monkeypatch: pytest.MonkeyPatch) -> None:
@@ -23,9 +30,19 @@ def test_configuracion_lee_variables_con_prefijo_minutas(monkeypatch: pytest.Mon
 
     configuracion = Configuracion()
 
-    assert configuracion.url_base_de_datos == URL_APP
+    assert configuracion.url_base_de_datos.get_secret_value() == URL_APP
     assert configuracion.nivel_de_registro == "INFO"
     assert configuracion.entorno == "desarrollo"
+    assert configuracion.directorio_de_imagenes == Path("/var/lib/minutas/imagenes")
+
+
+def test_configuracion_oculta_la_url_al_mostrarse(monkeypatch: pytest.MonkeyPatch) -> None:
+    monkeypatch.setenv("MINUTAS_URL_BASE_DE_DATOS", URL_APP)
+
+    configuracion = Configuracion()
+
+    assert "clave" not in repr(configuracion)
+    assert "clave" not in str(configuracion.model_dump())
 
 
 def test_configuracion_ignora_la_url_del_owner(monkeypatch: pytest.MonkeyPatch) -> None:
@@ -57,4 +74,5 @@ def test_configuracion_de_migraciones_lee_solo_la_url_del_owner(
 
     configuracion = ConfiguracionDeMigraciones()
 
-    assert configuracion.model_dump() == {"url_base_de_datos_migraciones": URL_OWNER}
+    assert list(configuracion.model_dump()) == ["url_base_de_datos_migraciones"]
+    assert configuracion.url_base_de_datos_migraciones.get_secret_value() == URL_OWNER
