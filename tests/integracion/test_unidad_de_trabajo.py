@@ -6,7 +6,10 @@ from sqlalchemy import QueuePool, text
 from sqlalchemy.exc import DBAPIError
 from sqlalchemy.ext.asyncio import AsyncEngine, AsyncSession, async_sessionmaker
 
-from minutas.compartido.aplicacion.unidad_de_trabajo import UnidadDeTrabajo
+from minutas.compartido.aplicacion.unidad_de_trabajo import (
+    UnidadDeTrabajo,
+    UnidadDeTrabajoDePlataforma,
+)
 from minutas.compartido.dominio.local_id import LocalId
 from minutas.compartido.infraestructura import unidad_de_trabajo_sqlalchemy
 from minutas.compartido.infraestructura.base_de_datos import (
@@ -14,6 +17,7 @@ from minutas.compartido.infraestructura.base_de_datos import (
     crear_motor,
 )
 from minutas.compartido.infraestructura.unidad_de_trabajo_sqlalchemy import (
+    UnidadDeTrabajoDePlataformaSQLAlchemy,
     UnidadDeTrabajoSQLAlchemy,
 )
 from soporte.base_de_prueba import BaseDePrueba
@@ -77,3 +81,30 @@ async def test_asignar_adaptador_al_puerto_conserva_el_local(
     unidad: UnidadDeTrabajo = UnidadDeTrabajoSQLAlchemy(fabrica, local_id)
 
     assert unidad.local_id == local_id
+
+
+async def test_unidad_de_plataforma_no_fija_ningun_local(
+    fabrica: async_sessionmaker[AsyncSession],
+) -> None:
+    async with UnidadDeTrabajoDePlataformaSQLAlchemy(fabrica) as unidad:
+        valor = await unidad.sesion.scalar(text("SELECT current_setting('app.local_id', true)"))
+
+    assert not valor
+
+
+async def test_salir_de_la_unidad_de_plataforma_devuelve_la_conexion_al_pool(
+    motor: AsyncEngine, fabrica: async_sessionmaker[AsyncSession]
+) -> None:
+    async with UnidadDeTrabajoDePlataformaSQLAlchemy(fabrica) as unidad:
+        await unidad.sesion.execute(text("SELECT 1"))
+        assert cast(QueuePool, motor.pool).checkedout() == 1
+
+    assert cast(QueuePool, motor.pool).checkedout() == 0
+
+
+def test_asignar_adaptador_de_plataforma_al_puerto_no_tiene_local(
+    fabrica: async_sessionmaker[AsyncSession],
+) -> None:
+    unidad: UnidadDeTrabajoDePlataforma = UnidadDeTrabajoDePlataformaSQLAlchemy(fabrica)
+
+    assert not hasattr(unidad, "local_id")
