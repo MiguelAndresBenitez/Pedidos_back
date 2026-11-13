@@ -1,7 +1,7 @@
 """Agregado Local: la tienda, sus datos, sus horarios y si está abierta."""
 
 from collections.abc import Mapping
-from datetime import date, datetime, time
+from datetime import UTC, date, datetime, time
 from types import MappingProxyType
 
 from minutas.compartido.dominio.local_id import LocalId
@@ -23,6 +23,9 @@ from minutas.locales.dominio.reglas_de_jornada import ReglasDeJornada
 from minutas.locales.dominio.slug import Slug
 from minutas.locales.dominio.whatsapp import Whatsapp
 from minutas.locales.dominio.zona_horaria import ZonaHoraria
+
+# La próxima apertura se busca en esta ventana: una semana y un día de margen.
+DIAS_A_BUSCAR_APERTURA = 8
 
 
 class Local:
@@ -168,6 +171,25 @@ class Local:
             and self._cierre_manual.permite_abrir(jornada)
             and self._horario.contiene(momento)
         )
+
+    def proxima_apertura(self, ahora: datetime) -> datetime | None:
+        """Primer inicio de franja en el que el local abriría; `None` si está abierto ahora."""
+        if self.esta_abierto(ahora):
+            return None
+        candidatas = (
+            apertura
+            for zona in self._jornada.zonas()
+            for apertura in self._aperturas_en(zona, ahora)
+            if apertura > ahora and self.esta_abierto(apertura)
+        )
+        return min(candidatas, default=None)
+
+    def _aperturas_en(self, zona: ZonaHoraria, ahora: datetime) -> list[datetime]:
+        desde = ahora.astimezone(zona.info).date()
+        return [
+            apertura.replace(tzinfo=zona.info).astimezone(UTC)
+            for apertura in self._horario.aperturas(desde, DIAS_A_BUSCAR_APERTURA)
+        ]
 
     def _programar(self, nuevas: ReglasDeJornada, ahora: datetime) -> date:
         jornada = self._jornada.programar(nuevas, ahora)
