@@ -1,0 +1,49 @@
+name: CI
+
+on:
+  push:
+    branches: [main]
+  pull_request:
+
+permissions:
+  contents: read
+
+jobs:
+  calidad:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: astral-sh/setup-uv@v6
+      - name: Instalar dependencias
+        run: uv sync --frozen
+      - name: Lint
+        run: uv run ruff check
+      - name: Formato
+        run: uv run ruff format --check
+      - name: Tipos
+        run: uv run mypy
+      - name: Tests
+        run: uv run pytest -v
+
+  compose:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - name: Preparar el entorno
+        run: cp .env.ejemplo .env
+      - name: Levantar base, migraciones y API
+        run: docker compose up --build --detach --wait api
+      - name: Salud
+        run: curl --fail --silent --show-error http://127.0.0.1:8000/salud
+      - name: Alta de un local por consola
+        run: >-
+          docker compose exec -T api python -m minutas.cli alta-local
+          --slug demo --nombre Demo --whatsapp "0351 15 512-3456"
+      - name: Tienda pública
+        run: curl --fail --silent --show-error http://127.0.0.1:8000/api/v1/tiendas/demo
+      - name: Logs
+        if: failure()
+        run: docker compose logs
+      - name: Bajar
+        if: always()
+        run: docker compose down --volumes
