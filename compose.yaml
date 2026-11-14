@@ -1,0 +1,51 @@
+services:
+  db:
+    image: postgres:17-alpine
+    environment:
+      POSTGRES_DB: minutas
+      POSTGRES_USER: postgres
+      POSTGRES_PASSWORD: ${POSTGRES_PASSWORD:?falta POSTGRES_PASSWORD en .env}
+      MINUTAS_CLAVE_OWNER: ${MINUTAS_CLAVE_OWNER:?falta MINUTAS_CLAVE_OWNER en .env}
+      MINUTAS_CLAVE_APP: ${MINUTAS_CLAVE_APP:?falta MINUTAS_CLAVE_APP en .env}
+    volumes:
+      - datos-postgres:/var/lib/postgresql/data
+      - ./docker/postgres/roles.sql:/docker-entrypoint-initdb.d/01-roles.sql:ro
+      - ./docker/postgres/02-claves.sh:/docker-entrypoint-initdb.d/02-claves.sh:ro
+    ports:
+      - "127.0.0.1:${PUERTO_DB:-5432}:5432"
+    healthcheck:
+      test: ["CMD-SHELL", "pg_isready -h 127.0.0.1 -U postgres -d minutas"]
+      start_period: 60s
+      start_interval: 1s
+      interval: 5s
+      timeout: 3s
+      retries: 5
+
+  migraciones:
+    build: .
+    command: ["alembic", "upgrade", "head"]
+    environment:
+      MINUTAS_URL_BASE_DE_DATOS_MIGRACIONES: postgresql+asyncpg://minutas_owner:${MINUTAS_CLAVE_OWNER}@db:5432/minutas
+    depends_on:
+      db:
+        condition: service_healthy
+
+  api:
+    build: .
+    environment:
+      MINUTAS_URL_BASE_DE_DATOS: postgresql+asyncpg://minutas_app:${MINUTAS_CLAVE_APP}@db:5432/minutas
+      MINUTAS_NIVEL_DE_REGISTRO: ${MINUTAS_NIVEL_DE_REGISTRO:-INFO}
+      MINUTAS_ENTORNO: desarrollo
+    ports:
+      - "127.0.0.1:8000:8000"
+    healthcheck:
+      test: ["CMD", "python", "-c", "import urllib.request; urllib.request.urlopen('http://127.0.0.1:8000/salud')"]
+      interval: 5s
+      timeout: 3s
+      retries: 10
+    depends_on:
+      migraciones:
+        condition: service_completed_successfully
+
+volumes:
+  datos-postgres:
