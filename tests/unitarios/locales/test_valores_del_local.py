@@ -28,9 +28,14 @@ def test_crear_slug_invalido_falla(valor: str) -> None:
 
 
 @pytest.mark.parametrize("valor", ["api", "panel", "admin", "tiendas"])
-def test_crear_slug_reservado_falla(valor: str) -> None:
+def test_asegurar_disponible_con_un_slug_reservado_falla(valor: str) -> None:
     with pytest.raises(SlugReservado, match="palabra reservada"):
-        Slug(valor)
+        Slug(valor).asegurar_disponible()
+
+
+def test_crear_slug_reservado_lo_acepta() -> None:
+    """Un local guardado con un slug que después se reservó se tiene que poder cargar."""
+    assert str(Slug("api")) == "api"
 
 
 @pytest.mark.parametrize(
@@ -57,9 +62,15 @@ def test_whatsapp_desde_texto_que_no_es_un_celular_falla(texto: str) -> None:
         Whatsapp.desde_texto(texto)
 
 
-def test_crear_whatsapp_sin_normalizar_falla() -> None:
+@pytest.mark.parametrize("numero", ["03515123456", "+5493515123456", "549 351 5123456", "1234567"])
+def test_crear_whatsapp_sin_normalizar_falla(numero: str) -> None:
     with pytest.raises(WhatsappInvalido):
-        Whatsapp("03515123456")
+        Whatsapp(numero)
+
+
+def test_crear_whatsapp_normalizado_no_vuelve_a_consultar_la_numeracion() -> None:
+    """Un fijo no pasa `desde_texto`, pero un número ya guardado se carga aunque la tabla cambie."""
+    assert Whatsapp("543514123456").numero == "543514123456"
 
 
 def test_color_desde_texto_pasa_a_minusculas() -> None:

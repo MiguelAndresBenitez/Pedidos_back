@@ -141,6 +141,7 @@ class Local:
     # Consola del owner: no pasan por `asegurar_modificable`.
 
     def cambiar_slug(self, slug: Slug) -> None:
+        slug.asegurar_disponible()
         self._slug = slug
 
     def cambiar_zona_horaria(self, zona: ZonaHoraria, ahora: datetime) -> date:
@@ -208,6 +209,7 @@ def crear_local(
     slug: Slug, nombre: str, whatsapp: Whatsapp, modalidades: frozenset[Modalidad]
 ) -> Local:
     """Alta del owner: color, zona y corte por defecto, sin horarios ni cierre."""
+    slug.asegurar_disponible()
     datos = DatosDelLocal(
         nombre=nombre,
         descripcion=None,

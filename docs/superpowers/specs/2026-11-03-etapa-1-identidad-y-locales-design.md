@@ -32,7 +32,7 @@ La 1a es dominio puro y de bajo riesgo; la 1b suma lo que depende de Google, coo
 | Login | Botón de Google en el panel; el backend verifica el ID token con `google-auth`. Solo entra quien el owner dio de alta. El primer login vincula la cuenta de Google (`sub`); los siguientes se buscan por `sub`. | Flujo con redirección y client secret: más código y un secreto que guardar. Identificar solo por email: el email de una cuenta de Google puede cambiar o reasignarse. |
 | Sesiones | Cookie `__Host-sesion` `HttpOnly` con token opaco; vencen tras 7 días sin uso y a los 30 días sí o sí. CSRF: `SameSite=Lax` + `Origin` permitido en toda escritura. | — |
 | Despliegue | Un solo dominio (`minutas.app`, provisorio) con un proxy que reparte por ruta: `/api/*` al backend, el resto al front. Front y back en servidores distintos. | Subdominios: obliga a configurar CORS y cualquier subdominio cuenta como "mismo sitio". Dominios distintos: la cookie `Lax` no viaja. |
-| Slug | Lo fija y lo cambia solo el owner por consola. 3 a 40 caracteres `a-z 0-9 -`, único, sin palabras reservadas (`api`, `panel`, `admin`…). | Que lo cambie el admin: rompería el link publicado en redes sin querer. |
+| Slug | Lo fija y lo cambia solo el owner por consola. 3 a 40 caracteres `a-z 0-9 -`, único, sin palabras reservadas (`api`, `panel`, `admin`…). Las reservadas se controlan al elegir el slug (alta y cambio), no al cargarlo: la lista puede crecer sin dejar locales existentes sin poder abrirse. | Que lo cambie el admin: rompería el link publicado en redes sin querer. |
 | Aislamiento | Toda escritura exige el local fijado en la transacción, sin excepción. La única lectura sin local fijado es la de `locales`, para resolver el slug. | `locales` sin RLS: un descuido permitiría que un local escriba datos de otro. |
 | Concurrencia | Bloqueo optimista del `Local`: columna `version`; si otro lo guardó desde que se leyó, `409 local_modificado_en_paralelo` y se recarga. | Bloqueo pesimista (`FOR UPDATE`): una lectura especial por repositorio. Nada: una edición del panel podía revertir una suspensión hecha al mismo tiempo. |
 | WhatsApp | Se interpreta con `phonenumbers` (Argentina por defecto), tiene que ser un celular y se guarda en el formato de WhatsApp (`549…`). | Regex genérico: acepta números con los que el link `wa.me` no funciona. Exigir el formato final: el admin no sabe quitar el 0 y el 15. |
@@ -63,7 +63,7 @@ Todo el comportamiento del local vive en el agregado `Local`, que recibe la hora
 | Nombre | 1 a 80 caracteres |
 | Descripción | Hasta 500 caracteres, opcional |
 | Dirección | Opcional |
-| WhatsApp | Se acepta como lo escribe una persona (`0351 15 123-4567`, `+54 9 351…`); se interpreta con `phonenumbers` (región AR), tiene que ser celular y se guarda en formato WhatsApp (`5493511234567`) |
+| WhatsApp | Se acepta como lo escribe una persona (`0351 15 123-4567`, `+54 9 351…`); se interpreta con `phonenumbers` (región AR), tiene que ser celular y se guarda en formato WhatsApp (`5493511234567`). Al cargarlo de la base solo se valida ese formato, así un cambio en la tabla de numeración no deja un local sin poder abrirse |
 | Color | `#RRGGBB` |
 | Modalidades | Delivery, retiro o ambas; nunca ninguna |
 | Zona horaria | IANA; por defecto `America/Argentina/Buenos_Aires`; solo por consola, rige desde la próxima jornada |

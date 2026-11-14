@@ -1,5 +1,6 @@
 """Número de WhatsApp del local, en el formato que usa el link `wa.me`."""
 
+import re
 from dataclasses import dataclass
 from typing import Self
 
@@ -8,6 +9,8 @@ import phonenumbers
 from minutas.locales.dominio.errores import WhatsappInvalido
 
 REGION_POR_DEFECTO = "AR"
+# E.164 sin el `+`: el código de país nunca empieza con 0; de 8 a 15 dígitos en total.
+PATRON_NORMALIZADO = re.compile(r"[1-9][0-9]{7,14}")
 TIPOS_DE_CELULAR = frozenset(
     {phonenumbers.PhoneNumberType.MOBILE, phonenumbers.PhoneNumberType.FIXED_LINE_OR_MOBILE}
 )
@@ -19,12 +22,16 @@ MENSAJE = (
 
 @dataclass(frozen=True, slots=True)
 class Whatsapp:
-    """Solo dígitos, con código de país: `5493515123456`."""
+    """Solo dígitos, con código de país: `5493515123456`.
+
+    El constructor exige el formato normalizado. Que sea un celular lo decide `desde_texto`,
+    con la tabla de numeración: un número ya guardado no se vuelve a juzgar si la tabla cambia.
+    """
 
     numero: str
 
     def __post_init__(self) -> None:
-        if desde_texto_o_none(f"+{self.numero}") != self.numero:
+        if not PATRON_NORMALIZADO.fullmatch(self.numero):
             raise WhatsappInvalido(MENSAJE.format(texto=self.numero))
 
     @classmethod

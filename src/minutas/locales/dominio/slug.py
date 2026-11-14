@@ -27,6 +27,12 @@ SLUGS_RESERVADOS = frozenset(
 
 @dataclass(frozen=True, slots=True)
 class Slug:
+    """El formato es invariante del valor; estar reservado no, porque la lista crece.
+
+    Un slug guardado antes de reservarse se sigue pudiendo cargar (y cambiar). Las palabras
+    reservadas se controlan al elegir un slug: en el alta y en el cambio de slug.
+    """
+
     valor: str
 
     def __post_init__(self) -> None:
@@ -36,6 +42,9 @@ class Slug:
                 f"'{self.valor}' no es un slug válido: de 3 a 40 caracteres entre a-z, 0-9 y "
                 "guiones, sin guion al principio, al final ni dos seguidos"
             )
+
+    def asegurar_disponible(self) -> None:
+        """Lanza `SlugReservado` si el slug es una palabra reservada."""
         if self.valor in SLUGS_RESERVADOS:
             raise SlugReservado(f"'{self.valor}' es una palabra reservada")
 

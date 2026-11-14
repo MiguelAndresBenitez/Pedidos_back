@@ -10,6 +10,7 @@ from minutas.locales.dominio.errores import (
     DatoDelLocalInvalido,
     FranjaCortaLaHoraDeCorte,
     LocalSuspendido,
+    SlugReservado,
 )
 from minutas.locales.dominio.estado_del_local import Activo, Suspendido
 from minutas.locales.dominio.franja_horaria import FranjaHoraria
@@ -59,6 +60,20 @@ def test_crear_local_con_nombre_invalido_falla(nombre: str) -> None:
         crear_local(
             Slug("la-esquina"), nombre, Whatsapp("5493515123456"), frozenset({Modalidad.RETIRO})
         )
+
+
+def test_crear_local_con_slug_reservado_falla() -> None:
+    with pytest.raises(SlugReservado):
+        crear_local(
+            Slug("api"), "La Esquina", Whatsapp("5493515123456"), frozenset({Modalidad.RETIRO})
+        )
+
+
+def test_cambiar_slug_a_uno_reservado_falla(local: Local) -> None:
+    with pytest.raises(SlugReservado):
+        local.cambiar_slug(Slug("panel"))
+
+    assert local.slug == Slug("la-esquina")
 
 
 def test_crear_local_sin_modalidades_falla() -> None:
