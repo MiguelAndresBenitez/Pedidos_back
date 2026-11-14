@@ -36,6 +36,8 @@ services:
       MINUTAS_URL_BASE_DE_DATOS: postgresql+asyncpg://minutas_app:${MINUTAS_CLAVE_APP}@db:5432/minutas
       MINUTAS_NIVEL_DE_REGISTRO: ${MINUTAS_NIVEL_DE_REGISTRO:-INFO}
       MINUTAS_ENTORNO: desarrollo
+    volumes:
+      - imagenes:/var/lib/minutas/imagenes
     ports:
       - "127.0.0.1:8000:8000"
     healthcheck:
@@ -49,3 +51,4 @@ services:
 
 volumes:
   datos-postgres:
+  imagenes:

@@ -1,8 +1,9 @@
 from collections.abc import AsyncIterator
+from typing import Any, cast
 
 import asyncpg
 import pytest
-from sqlalchemy import text
+from sqlalchemy import CursorResult, text
 from sqlalchemy.exc import DBAPIError
 from sqlalchemy.ext.asyncio import AsyncSession, async_sessionmaker
 
@@ -98,7 +99,7 @@ async def test_actualizar_notas_de_otro_local_no_afecta_filas(
 
     async with UnidadDeTrabajoSQLAlchemy(fabrica, local_a) as unidad:
         resultado = await unidad.sesion.execute(ACTUALIZAR_TEXTO, {"texto": "pisada"})
-        assert resultado.rowcount == 0  # type: ignore[attr-defined]
+        assert cast(CursorResult[Any], resultado).rowcount == 0
 
     async with UnidadDeTrabajoSQLAlchemy(fabrica, local_b) as unidad:
         textos = (await unidad.sesion.scalars(LEER_TEXTOS)).all()
@@ -113,7 +114,7 @@ async def test_borrar_notas_de_otro_local_no_afecta_filas(
 
     async with UnidadDeTrabajoSQLAlchemy(fabrica, local_a) as unidad:
         resultado = await unidad.sesion.execute(BORRAR_NOTAS)
-        assert resultado.rowcount == 0  # type: ignore[attr-defined]
+        assert cast(CursorResult[Any], resultado).rowcount == 0
 
     assert await contar_notas(fabrica, local_b) == 1
 

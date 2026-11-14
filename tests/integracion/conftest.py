@@ -1,12 +1,18 @@
 import asyncio
-from collections.abc import Iterator
+from collections.abc import AsyncIterator, Iterator
 from pathlib import Path
 
 import asyncpg
 import pytest
+from sqlalchemy.ext.asyncio import AsyncSession, async_sessionmaker
 from testcontainers.community.postgres import PostgresContainer
 
+from minutas.compartido.infraestructura.base_de_datos import (
+    crear_fabrica_de_sesiones,
+    crear_motor,
+)
 from soporte.base_de_prueba import BaseDePrueba
+from soporte.esquema import migrar_hasta_head, vaciar_tablas
 
 RAIZ = Path(__file__).resolve().parents[2]
 ROLES_SQL = RAIZ / "docker" / "postgres" / "roles.sql"
@@ -34,3 +40,20 @@ def base_de_prueba() -> Iterator[BaseDePrueba]:
         )
         asyncio.run(preparar_roles(base))
         yield base
+
+
+@pytest.fixture
+def base_migrada(base_de_prueba: BaseDePrueba) -> BaseDePrueba:
+    """Base en head y con las tablas vacías."""
+    migrar_hasta_head(base_de_prueba)
+    asyncio.run(vaciar_tablas(base_de_prueba))
+    return base_de_prueba
+
+
+@pytest.fixture
+async def fabrica_de_sesiones(
+    base_migrada: BaseDePrueba,
+) -> AsyncIterator[async_sessionmaker[AsyncSession]]:
+    motor = crear_motor(base_migrada.url_app())
+    yield crear_fabrica_de_sesiones(motor)
+    await motor.dispose()

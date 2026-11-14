@@ -24,3 +24,15 @@ curl localhost:8000/salud
 
 Las contraseñas solo pueden tener letras, números, `-` y `_`: van dentro de URLs de conexión.
 Los roles se crean con el volumen vacío: si cambiás claves después del primer arranque, corré `docker compose down -v`.
+
+## Operaciones del owner
+
+La consola corre dentro del contenedor de la API, con su misma configuración:
+
+```bash
+docker compose exec api python -m minutas.cli alta-local --slug la-esquina --nombre "La Esquina" --whatsapp "0351 15 512-3456"
+docker compose exec api python -m minutas.cli cambiar-zona-horaria --slug la-esquina --zona America/Santiago
+docker compose exec api python -m minutas.cli --help
+```
+
+Comandos: `alta-local`, `cambiar-slug`, `cambiar-zona-horaria`, `suspender-local` y `reactivar-local`.
