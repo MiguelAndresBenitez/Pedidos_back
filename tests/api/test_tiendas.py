@@ -94,10 +94,12 @@ async def test_obtener_tienda_inexistente_responde_404(cliente: httpx.AsyncClien
     assert respuesta.json()["code"] == "local_no_encontrado"
 
 
-async def test_obtener_tienda_con_slug_mal_formado_responde_422(
-    cliente: httpx.AsyncClient,
+@pytest.mark.parametrize("slug", ["La_Esquina", "api"])
+async def test_obtener_tienda_con_slug_mal_formado_o_reservado_responde_404(
+    cliente: httpx.AsyncClient, slug: str
 ) -> None:
-    respuesta = await cliente.get("/api/v1/tiendas/La_Esquina")
+    """Para la tienda, un slug que no puede existir es un local que no existe."""
+    respuesta = await cliente.get(f"/api/v1/tiendas/{slug}")
 
-    assert respuesta.status_code == 422
-    assert respuesta.json()["code"] == "slug_invalido"
+    assert respuesta.status_code == 404
+    assert respuesta.json()["code"] == "local_no_encontrado"

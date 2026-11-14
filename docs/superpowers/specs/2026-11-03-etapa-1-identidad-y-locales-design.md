@@ -301,7 +301,7 @@ Todo bajo `/api/v1`, con errores en `problem+json` como en la etapa 0.
 
 | Ruta | Respuesta |
 | --- | --- |
-| `GET /tiendas/{slug}` | `200`: `slug`, `nombre`, `descripcion`, `direccion`, `whatsapp`, `color`, `modalidades`, `zona_horaria`, `horarios` (franjas en hora local), `logo_url`, `portada_url`, `abierto_ahora`, `proxima_apertura` (UTC o `null`) y `disponible: true`. Suspendido: `200 {slug, disponible: false}`. Inexistente: `404 local_no_encontrado` |
+| `GET /tiendas/{slug}` | `200`: `slug`, `nombre`, `descripcion`, `direccion`, `whatsapp`, `color`, `modalidades`, `zona_horaria`, `horarios` (franjas en hora local), `logo_url`, `portada_url`, `abierto_ahora`, `proxima_apertura` (UTC o `null`) y `disponible: true`. Suspendido: `200 {slug, disponible: false}`. Inexistente, mal formado o reservado: `404 local_no_encontrado` |
 | `GET /imagenes/{nombre}` | El archivo WebP con `Cache-Control: public, max-age=31536000, immutable`. El nombre se valida (`<uuid>.webp`) antes de tocar el disco |
 
 La tienda: la unidad de plataforma resuelve el slug a un `local_id` y la unidad del local carga el `Local` con sus franjas; las dos son de solo lectura. `ObtenerTienda` devuelve una vista de lectura (`TiendaDisponible` con todo calculado, o `TiendaNoDisponible`) que la API solo traduce. La hora se lee del `Reloj` una vez por solicitud y los casos de uso la reciben como `ahora`.
