@@ -39,8 +39,12 @@ VERSION_INICIAL = 0
 MENSAJE_DE_CONFLICTO = "El local cambió mientras lo editabas; volvé a cargarlo e intentá de nuevo"
 
 # El vocabulario de las columnas vive acá, no en el dominio: tablas de despacho en los dos sentidos.
+# `tests/unitarios/locales/test_codigos_de_columnas.py` exige un código por cada variante.
 CODIGOS_DE_ESTADO: dict[type[EstadoDelLocal], str] = {Activo: "activo", Suspendido: "suspendido"}
-ESTADOS: dict[str, Callable[[], EstadoDelLocal]] = {"activo": Activo, "suspendido": Suspendido}
+ESTADOS: dict[str, Callable[[], EstadoDelLocal]] = {
+    codigo: variante for variante, codigo in CODIGOS_DE_ESTADO.items()
+}
+# El cierre por jornada se arma con su fecha: la vuelta no se puede derivar de la ida.
 CODIGOS_DE_CIERRE: dict[type[CierreManual], str | None] = {
     SinCierre: None,
     CierrePorJornada: "por_jornada",
