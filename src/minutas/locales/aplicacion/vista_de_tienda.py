@@ -3,8 +3,9 @@
 from collections.abc import Callable
 from dataclasses import dataclass
 from datetime import datetime
+from typing import assert_never
 
-from minutas.locales.dominio.estado_del_local import Activo, EstadoDelLocal, Suspendido
+from minutas.locales.dominio.estado_del_local import Activo, Suspendido
 from minutas.locales.dominio.franja_horaria import FranjaHoraria
 from minutas.locales.dominio.imagen import NombreDeImagen, TipoDeImagen
 from minutas.locales.dominio.local import Local
@@ -45,7 +46,7 @@ def _url(local: Local, tipo: TipoDeImagen, url_de: UrlDeImagen) -> str | None:
     return None if nombre is None else url_de(nombre)
 
 
-def _disponible(local: Local, ahora: datetime, url_de: UrlDeImagen) -> VistaDeTienda:
+def _disponible(local: Local, ahora: datetime, url_de: UrlDeImagen) -> TiendaDisponible:
     datos = local.datos
     return TiendaDisponible(
         slug=local.slug.valor,
@@ -64,18 +65,16 @@ def _disponible(local: Local, ahora: datetime, url_de: UrlDeImagen) -> VistaDeTi
     )
 
 
-def _no_disponible(local: Local, _ahora: datetime, _url_de: UrlDeImagen) -> VistaDeTienda:
-    return TiendaNoDisponible(local.slug.valor)
-
-
-VISTAS_POR_ESTADO: dict[
-    type[EstadoDelLocal], Callable[[Local, datetime, UrlDeImagen], VistaDeTienda]
-] = {
-    Activo: _disponible,
-    Suspendido: _no_disponible,
-}
-
-
 def crear_vista_de_tienda(local: Local, ahora: datetime, url_de: UrlDeImagen) -> VistaDeTienda:
-    """La variante la decide el estado del local, con una tabla de despacho."""
-    return VISTAS_POR_ESTADO[type(local.estado)](local, ahora, url_de)
+    """La variante la decide el estado del local.
+
+    El `match` es exhaustivo sobre `EstadoDelLocal`: si se suma un estado, mypy marca este
+    lugar con `assert_never` en vez de que la tienda falle en producción.
+    """
+    match local.estado:
+        case Activo():
+            return _disponible(local, ahora, url_de)
+        case Suspendido():
+            return TiendaNoDisponible(local.slug.valor)
+        case _:
+            assert_never(local.estado)
