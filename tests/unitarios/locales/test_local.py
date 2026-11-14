@@ -45,7 +45,6 @@ def test_crear_local_usa_los_valores_por_defecto() -> None:
     )
 
     assert local.id.valor.version == 7
-    assert local.version == 0
     assert local.estado == Activo()
     assert local.cierre_manual == SinCierre()
     assert local.horario == Horario.vacio()
@@ -189,14 +188,6 @@ def test_cambiar_slug_funciona_con_el_local_suspendido(local: Local) -> None:
     local.cambiar_slug(Slug("esquina-nueva"))
 
     assert local.slug == Slug("esquina-nueva")
-
-
-def test_registrar_guardado_avanza_la_version(local: Local) -> None:
-    version = local.version
-
-    local.registrar_guardado()
-
-    assert local.version == version + 1
 
 
 def test_zona_horaria_en_devuelve_la_que_rige_en_ese_instante(local: Local) -> None:

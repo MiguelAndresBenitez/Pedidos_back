@@ -33,6 +33,7 @@ class Local:
 
     Los métodos del panel empiezan con `self.asegurar_modificable()`; los de la
     consola del owner (cambiar slug o zona, suspender, reactivar) no, a propósito.
+    La versión del bloqueo optimista no es parte del agregado: la lleva el repositorio.
     """
 
     def __init__(
@@ -46,7 +47,6 @@ class Local:
         cierre_manual: CierreManual,
         imagenes: Mapping[TipoDeImagen, NombreDeImagen],
         estado: EstadoDelLocal,
-        version: int,
     ) -> None:
         self._id = id
         self._slug = slug
@@ -56,7 +56,6 @@ class Local:
         self._cierre_manual = cierre_manual
         self._imagenes = dict(imagenes)
         self._estado = estado
-        self._version = version
 
     @property
     def id(self) -> LocalId:
@@ -89,15 +88,6 @@ class Local:
     @property
     def estado(self) -> EstadoDelLocal:
         return self._estado
-
-    @property
-    def version(self) -> int:
-        """Bloqueo optimista: la versión que se leyó. Solo el repositorio la avanza."""
-        return self._version
-
-    def registrar_guardado(self) -> None:
-        """Lo llama el repositorio después de guardar: la próxima escritura compara con esta."""
-        self._version += 1
 
     def asegurar_modificable(self) -> None:
         """La regla de suspensión vive en el estado; el agregado la expone en un solo lugar."""
@@ -227,5 +217,4 @@ def crear_local(
         cierre_manual=SinCierre(),
         imagenes={},
         estado=Activo(),
-        version=0,
     )

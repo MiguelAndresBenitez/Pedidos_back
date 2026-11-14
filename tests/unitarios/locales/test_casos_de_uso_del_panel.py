@@ -48,7 +48,7 @@ async def test_actualizar_datos_guarda_e_incrementa_la_version(
     await ActualizarDatosDelLocal(base.crear_unidad_del_local).ejecutar(local.id, datos)
 
     assert base.locales[local.id].datos == datos
-    assert base.locales[local.id].version == 1
+    assert base.versiones[local.id] == 1
 
 
 async def test_reemplazar_horario_invalido_no_guarda_nada(

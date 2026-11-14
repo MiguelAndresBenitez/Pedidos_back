@@ -15,6 +15,7 @@ class BaseDeLocalesEnMemoria:
 
     def __init__(self) -> None:
         self.locales: dict[LocalId, Local] = {}
+        self.versiones: dict[LocalId, int] = {}
 
     def crear_unidad_del_local(self, local_id: LocalId) -> "UnidadDelLocalEnMemoria":
         return UnidadDelLocalEnMemoria(self, local_id)
@@ -49,22 +50,24 @@ class RepositorioDeLocalesEnMemoria:
         guardado = self._base.locales.get(self._local_id)
         if guardado is None:
             raise LocalNoEncontrado("El local no existe")
-        self.version_leida = guardado.version
+        self.version_leida = self._base.versiones[self._local_id]
         return deepcopy(guardado)
 
     async def agregar(self, local: Local) -> None:
         assert local.id == self._local_id, "RLS: solo se inserta el local fijado"
         self._asegurar_slug_libre(local)
         self.pendiente = deepcopy(local)
+        self.version_leida = 0
 
     async def guardar(self, local: Local) -> None:
-        guardado = self._base.locales.get(local.id)
-        if guardado is None:
+        if self.version_leida is None:
+            raise RuntimeError("Antes de guardar el local hay que obtenerlo o agregarlo")
+        if local.id not in self._base.locales:
             raise LocalNoEncontrado("El local no existe")
-        if guardado.version != local.version:
+        if self._base.versiones[local.id] != self.version_leida:
             raise LocalModificadoEnParalelo("El local cambió mientras lo editabas")
         self._asegurar_slug_libre(local)
-        local.registrar_guardado()
+        self.version_leida += 1
         self.pendiente = deepcopy(local)
 
     def _asegurar_slug_libre(self, local: Local) -> None:
@@ -82,13 +85,14 @@ class UnidadDelLocalEnMemoria(_Transaccion):
 
     async def confirmar(self) -> None:
         """Aplica el cambio, salvo que otra unidad haya guardado el local antes (como el UPDATE)."""
-        pendiente = self.locales.pendiente
-        if pendiente is None:
+        pendiente, version = self.locales.pendiente, self.locales.version_leida
+        if pendiente is None or version is None:
             return
-        confirmado = self._base.locales.get(pendiente.id)
-        if confirmado is not None and confirmado.version != pendiente.version - 1:
+        confirmada = self._base.versiones.get(pendiente.id)
+        if confirmada is not None and confirmada != version - 1:
             raise LocalModificadoEnParalelo("El local cambió mientras lo editabas")
         self._base.locales[pendiente.id] = pendiente
+        self._base.versiones[pendiente.id] = version
 
 
 class DirectorioEnMemoria:

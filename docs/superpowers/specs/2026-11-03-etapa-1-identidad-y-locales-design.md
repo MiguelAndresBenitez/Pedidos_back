@@ -70,7 +70,7 @@ Todo el comportamiento del local vive en el agregado `Local`, que recibe la hora
 | Hora de corte | Por defecto 06:00 |
 | Logo y portada | Opcionales; se guarda el nombre del archivo |
 | Estado | Activo o suspendido; solo lo cambia el owner por consola |
-| Versión | Número para el bloqueo optimista; lo incrementa el repositorio al guardar |
+| Versión | Número para el bloqueo optimista. No es parte del agregado: el repositorio recuerda la versión que leyó en la unidad de trabajo y la incrementa al guardar |
 
 ### Horarios
 
@@ -353,4 +353,5 @@ Resueltos el 2026-11-13 (ver Decisiones tomadas): restricción de exclusión (no
 1. **Políticas de `membresias`** (1b): en el login hay que leerla antes de saber el local. Propuesta a confirmar: el mismo esquema que `locales` (lectura abierta, escritura con el local fijado).
 2. **`nonce` en el login con Google** (1b): fuera del MVP, queda como mejora.
 3. **Sección 4 de la 1b:** endpoints del panel y de auth con sus cuerpos, y sus pruebas.
+   - **Bloqueo optimista entre solicitudes:** la versión no es parte del `Local`; el repositorio la recuerda dentro de la unidad de trabajo, así que hoy el bloqueo cubre ediciones concurrentes pero no un formulario viejo (el admin carga el panel, otro guarda, y el primero envía después). Si el panel lo necesita, `GET /panel/local` devuelve la versión (por ejemplo como `ETag`), el comando la manda en `If-Match`, el caso de uso la recibe y el repositorio compara contra ella; si no coincide, `409 local_modificado_en_paralelo`.
 4. **Plan de implementación** de la 1a; después, el de la 1b.

@@ -35,6 +35,7 @@ from minutas.locales.dominio.zona_horaria import ZonaHoraria
 from minutas.locales.infraestructura.tablas import FRANJAS_HORARIAS, LOCALES
 
 RESTRICCION_DE_SLUG = "uq_locales_slug"
+VERSION_INICIAL = 0
 MENSAJE_DE_CONFLICTO = "El local cambió mientras lo editabas; volvé a cargarlo e intentá de nuevo"
 
 # El vocabulario de las columnas vive acá, no en el dominio: tablas de despacho en los dos sentidos.
@@ -59,6 +60,7 @@ class RepositorioDeLocalesSQLAlchemy:
         self._sesion = sesion
         self._local_id = local_id
         self._horario_leido: Horario | None = None
+        self._version_leida: int | None = None
 
     async def obtener(self) -> Local:
         fila = (
@@ -81,25 +83,35 @@ class RepositorioDeLocalesSQLAlchemy:
         ).mappings()
         local = _desde_filas(fila, franjas.all())
         self._horario_leido = local.horario
+        self._version_leida = fila["version"]
         return local
 
     async def agregar(self, local: Local) -> None:
-        await self._escribir(insert(LOCALES).values(_a_fila(local)), local.slug)
+        fila = {**_a_fila(local), "version": VERSION_INICIAL}
+        await self._escribir(insert(LOCALES).values(fila), local.slug)
         await self._insertar_franjas(local)
+        self._horario_leido = local.horario
+        self._version_leida = VERSION_INICIAL
 
     async def guardar(self, local: Local) -> None:
         """Bloqueo optimista: solo escribe si nadie guardó el local desde que se leyó."""
+        leida = self._version_a_comparar()
         sentencia = (
             update(LOCALES)
-            .where(LOCALES.c.id == local.id.valor, LOCALES.c.version == local.version)
-            .values({**_a_fila(local), "version": local.version + 1, "actualizado_en": func.now()})
+            .where(LOCALES.c.id == local.id.valor, LOCALES.c.version == leida)
+            .values({**_a_fila(local), "version": leida + 1, "actualizado_en": func.now()})
         )
         resultado = await self._escribir(sentencia, local.slug)
         if resultado.rowcount != 1:
             raise LocalModificadoEnParalelo(MENSAJE_DE_CONFLICTO)
-        local.registrar_guardado()
+        self._version_leida = leida + 1
         if local.horario != self._horario_leido:
             await self._reemplazar_franjas(local)
+
+    def _version_a_comparar(self) -> int:
+        if self._version_leida is None:
+            raise RuntimeError("Antes de guardar el local hay que obtenerlo o agregarlo")
+        return self._version_leida
 
     async def _reemplazar_franjas(self, local: Local) -> None:
         """Solo cuando el horario cambió: suspender o cerrar no reescribe las franjas."""
@@ -154,7 +166,6 @@ def _a_fila(local: Local) -> dict[str, Any]:
         "logo": _nombre(imagenes.get(TipoDeImagen.LOGO)),
         "portada": _nombre(imagenes.get(TipoDeImagen.PORTADA)),
         "estado": CODIGOS_DE_ESTADO[type(local.estado)],
-        "version": local.version,
     }
 
 
@@ -214,5 +225,4 @@ def _desde_filas(fila: RowMapping, franjas: Sequence[RowMapping]) -> Local:
         cierre_manual=CIERRES[fila["cierre_manual"]](fila["cierre_manual_jornada"]),
         imagenes=imagenes,
         estado=ESTADOS[fila["estado"]](),
-        version=fila["version"],
     )

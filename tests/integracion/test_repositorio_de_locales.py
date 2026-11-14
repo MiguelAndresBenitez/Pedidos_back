@@ -1,3 +1,4 @@
+from collections.abc import Callable
 from datetime import UTC, date, datetime, time
 
 import pytest
@@ -29,6 +30,7 @@ from minutas.locales.infraestructura.unidades_de_trabajo_sqlalchemy import (
 pytestmark = pytest.mark.integracion
 
 LEER_IDS_DE_FRANJAS = text("SELECT id FROM franjas_horarias ORDER BY id")
+LEER_VERSION = text("SELECT version FROM locales WHERE id = :id")
 
 type Fabrica = async_sessionmaker[AsyncSession]
 
@@ -57,10 +59,20 @@ async def obtener(fabrica: Fabrica, local_id: LocalId) -> Local:
         return await unidad.locales.obtener()
 
 
-async def guardar(fabrica: Fabrica, local: Local) -> None:
-    async with UnidadDelLocalSQLAlchemy(fabrica, local.id) as unidad:
+async def modificar(fabrica: Fabrica, local_id: LocalId, cambio: Callable[[Local], object]) -> None:
+    """Obtener, cambiar y guardar en una misma unidad, como los casos de uso."""
+    async with UnidadDelLocalSQLAlchemy(fabrica, local_id) as unidad:
+        local = await unidad.locales.obtener()
+        cambio(local)
         await unidad.locales.guardar(local)
         await unidad.confirmar()
+
+
+async def leer_version(fabrica: Fabrica, local_id: LocalId) -> int:
+    async with fabrica() as sesion:
+        version = await sesion.scalar(LEER_VERSION, {"id": local_id.valor})
+    assert isinstance(version, int)
+    return version
 
 
 async def test_agregar_y_obtener_conserva_todo_el_agregado(fabrica_de_sesiones: Fabrica) -> None:
@@ -89,7 +101,7 @@ async def test_agregar_y_obtener_conserva_todo_el_agregado(fabrica_de_sesiones: 
     assert leido.jornada == local.jornada
     assert leido.imagenes == {TipoDeImagen.LOGO: LOGO}
     assert leido.estado == Suspendido()
-    assert leido.version == 0
+    assert await leer_version(fabrica_de_sesiones, local.id) == 0
 
 
 async def test_guardar_reemplaza_las_franjas_e_incrementa_la_version(
@@ -97,15 +109,43 @@ async def test_guardar_reemplaza_las_franjas_e_incrementa_la_version(
 ) -> None:
     local = nuevo_local()
     await agregar(fabrica_de_sesiones, local)
-    leido = await obtener(fabrica_de_sesiones, local.id)
     horario = Horario((FranjaHoraria(DiaDeLaSemana.MARTES, time(20), time(0, 30)),))
-    leido.reemplazar_horario(horario, AHORA)
 
-    await guardar(fabrica_de_sesiones, leido)
+    await modificar(
+        fabrica_de_sesiones, local.id, lambda leido: leido.reemplazar_horario(horario, AHORA)
+    )
 
     guardado = await obtener(fabrica_de_sesiones, local.id)
     assert guardado.horario == horario
-    assert guardado.version == 1
+    assert await leer_version(fabrica_de_sesiones, local.id) == 1
+
+
+async def test_guardar_dos_veces_en_la_misma_unidad_avanza_la_version_cada_vez(
+    fabrica_de_sesiones: Fabrica,
+) -> None:
+    local = nuevo_local()
+    await agregar(fabrica_de_sesiones, local)
+
+    async with UnidadDelLocalSQLAlchemy(fabrica_de_sesiones, local.id) as unidad:
+        leido = await unidad.locales.obtener()
+        leido.cerrar_hasta_nuevo_aviso()
+        await unidad.locales.guardar(leido)
+        leido.reabrir()
+        await unidad.locales.guardar(leido)
+        await unidad.confirmar()
+
+    assert await leer_version(fabrica_de_sesiones, local.id) == 2
+
+
+async def test_guardar_un_local_que_la_unidad_no_obtuvo_falla(fabrica_de_sesiones: Fabrica) -> None:
+    """Sin una versión leída en la misma unidad no hay contra qué comparar."""
+    local = nuevo_local()
+    await agregar(fabrica_de_sesiones, local)
+    leido = await obtener(fabrica_de_sesiones, local.id)
+
+    async with UnidadDelLocalSQLAlchemy(fabrica_de_sesiones, local.id) as unidad:
+        with pytest.raises(RuntimeError, match="obtener"):
+            await unidad.locales.guardar(leido)
 
 
 async def test_suspension_durante_una_edicion_del_admin_no_se_pierde(
@@ -117,9 +157,7 @@ async def test_suspension_durante_una_edicion_del_admin_no_se_pierde(
     async with UnidadDelLocalSQLAlchemy(fabrica_de_sesiones, local.id) as edicion_del_admin:
         leido_por_el_admin = await edicion_del_admin.locales.obtener()
 
-        a_suspender = await obtener(fabrica_de_sesiones, local.id)
-        a_suspender.suspender()
-        await guardar(fabrica_de_sesiones, a_suspender)
+        await modificar(fabrica_de_sesiones, local.id, Local.suspender)
 
         leido_por_el_admin.reabrir()
         with pytest.raises(LocalModificadoEnParalelo, match="volvé a cargarlo"):
@@ -139,10 +177,11 @@ async def test_guardar_con_el_slug_de_otro_local_falla(fabrica_de_sesiones: Fabr
     await agregar(fabrica_de_sesiones, nuevo_local())
     otro = nuevo_local("el-rincon")
     await agregar(fabrica_de_sesiones, otro)
-    otro.cambiar_slug(Slug("la-esquina"))
 
     with pytest.raises(SlugEnUso):
-        await guardar(fabrica_de_sesiones, otro)
+        await modificar(
+            fabrica_de_sesiones, otro.id, lambda local: local.cambiar_slug(Slug("la-esquina"))
+        )
 
 
 async def test_obtener_local_inexistente_falla(fabrica_de_sesiones: Fabrica) -> None:
