@@ -29,7 +29,7 @@ La 1a es dominio puro y de bajo riesgo; la 1b suma lo que depende de Google, coo
 | Zona horaria | Una por local, por defecto `America/Argentina/Buenos_Aires`; la cambia solo el owner con `cambiar-zona-horaria`. Como la hora de corte, el cambio rige **desde la próxima jornada**. | Sin campo: habría que migrar al salir del país. Editable en el panel: no hace falta hoy. Cambio inmediato: pasar a una zona con menos horas hace retroceder la jornada. |
 | Logo y portada | Disco, detrás del puerto `AlmacenDeImagenes`, servidas por la API con caché permanente; S3 + CDN entra después como otro adaptador. Se re-codifican a WebP con tamaño máximo. | Guardar el original: puede traer el GPS de la foto y pesar de más. Servirlas desde el proxy: obliga a compartir disco entre servidores. |
 | Instancias | Una sola instancia de la API mientras las imágenes estén en disco. Antes de escalar, se pasa a S3. | — |
-| Login | Botón de Google en el panel; el backend verifica el ID token con `google-auth`. Solo entra quien el owner dio de alta. El primer login vincula la cuenta de Google (`sub`); los siguientes se buscan por `sub`. | Flujo con redirección y client secret: más código y un secreto que guardar. Identificar solo por email: el email de una cuenta de Google puede cambiar o reasignarse. |
+| Login | Botón de Google en el panel; el backend verifica el ID token con `google-auth`, atado al navegador con un `nonce`. Solo entra quien el owner dio de alta. El primer login vincula la cuenta de Google (`sub`); los siguientes se buscan por `sub`. | Flujo con redirección y client secret: más código y un secreto que guardar. Identificar solo por email: el email de una cuenta de Google puede cambiar o reasignarse. |
 | Sesiones | Cookie `__Host-sesion` `HttpOnly` con token opaco; vencen tras 7 días sin uso y a los 30 días sí o sí. CSRF: `SameSite=Lax` + `Origin` permitido en toda escritura. El prefijo `__Host-` (y por lo tanto `Secure`) va siempre, también en desarrollo y en los tests. | Cookie configurable por entorno (sin `Secure` en desarrollo): una configuración equivocada en producción mandaría la sesión sin protección. Chrome y Firefox aceptan `Secure` en `http://localhost`; Safari no, y el equipo no lo usa (quien lo necesite levanta el front con HTTPS local). |
 | Despliegue | Un solo dominio (`minutas.app`, provisorio) con un proxy que reparte por ruta: `/api/*` al backend, el resto al front. Front y back en servidores distintos. | Subdominios: obliga a configurar CORS y cualquier subdominio cuenta como "mismo sitio". Dominios distintos: la cookie `Lax` no viaja. |
 | Edición del panel | Bloqueo optimista entre solicitudes: el panel recibe la versión del local en un `ETag` y la devuelve en `If-Match` en toda escritura, obligatorio. | Bloqueo solo dentro de la transacción: un formulario viejo (la compu abierta desde hace rato mientras se editó desde el celular) pisaría los cambios sin aviso, sobre todo con el `PUT` de horarios que reemplaza la semana entera. |
@@ -260,13 +260,15 @@ Sobre `locales` no se crea política de `DELETE`: con RLS forzado, sin política
 
 ### Login con Google
 
-1. El panel obtiene un ID token con el botón de Google y lo envía a `POST /api/v1/auth/google`.
-2. **El puerto `VerificadorDeIdentidad`** devuelve una `IdentidadVerificada(sub, email)` o lanza `TokenInvalido`. El adaptador usa `google-auth`:
+1. **Antes del botón, el `nonce`:** el panel llama a `POST /api/v1/auth/nonce`. El backend genera un secreto al azar (`GeneradorDeTokens`), lo devuelve en la cookie `__Host-nonce_de_login` (`HttpOnly; Secure; SameSite=Lax; Path=/; Max-Age=900`) y responde con su SHA-256, que es el `nonce`. El panel se lo pasa al botón (`google.accounts.id.initialize({ nonce })`) y Google lo incluye en el ID token que firma.
+2. El panel envía el ID token a `POST /api/v1/auth/google`. La cookie del nonce viaja sola.
+3. **El puerto `VerificadorDeIdentidad`** recibe el token y el `nonce` esperado (el SHA-256 de la cookie), y devuelve una `IdentidadVerificada(sub, email)` o lanza `TokenInvalido`. El adaptador usa `google-auth`:
    - verifica firma, audiencia (`MINUTAS_GOOGLE_CLIENT_ID`), emisor y vencimiento; `email_verified` no lo chequea la librería, así que el adaptador lo exige a mano;
+   - compara el `nonce` del token con el esperado (en tiempo constante); sin cookie, o con otro valor, es `TokenInvalido`;
    - corre en un hilo aparte para no bloquear el loop, con tolerancia de unos segundos de desfase de reloj. El caché de las claves públicas de Google no viene activado: el adaptador usa un transporte con caché (por ejemplo `CacheControl` sobre `requests`) para no pedirlas en cada login;
    - **ningún error de `google-auth` sale como 500:** un token malformado, vencido o con firma inválida es `TokenInvalido` (401); si no se pueden obtener las claves de Google (red caída, timeout), es `ServicioDeGoogleNoDisponible` (503), para que el front muestre "probá en un rato" y no "tu cuenta no sirve".
-3. **El repositorio busca primero por `sub`** (`obtener_por_identidad`): si no lo encuentra, busca por email **solo entre los pendientes**. El `sub` es el identificador permanente de la cuenta de Google; el email puede cambiar (renombre en Workspace, cuentas con email que no es de Gmail) o pasar a otra persona (una dirección reasignada), así que nunca identifica a un usuario ya vinculado.
-4. **El usuario se resuelve en el dominio,** con dos variantes que responden a `ingresar_con(identidad)`: `UsuarioSinVincular`, que pasa a `UsuarioVinculado` guardando el `sub` y el email, y `UsuarioVinculado`, que actualiza el email si cambió en Google:
+4. **El repositorio busca primero por `sub`** (`obtener_por_identidad`): si no lo encuentra, busca por email **solo entre los pendientes**. El `sub` es el identificador permanente de la cuenta de Google; el email puede cambiar (renombre en Workspace, cuentas con email que no es de Gmail) o pasar a otra persona (una dirección reasignada), así que nunca identifica a un usuario ya vinculado.
+5. **El usuario se resuelve en el dominio,** con dos variantes que responden a `ingresar_con(identidad)`: `UsuarioSinVincular`, que pasa a `UsuarioVinculado` guardando el `sub` y el email, y `UsuarioVinculado`, que actualiza el email si cambió en Google:
 
 | Situación | Resultado |
 | --- | --- |
@@ -276,7 +278,9 @@ Sobre `locales` no se crea política de `DELETE`: con RLS forzado, sin política
 
    Si el email nuevo de un usuario vinculado coincide con un usuario pendiente, ese pendiente queda huérfano: nadie puede reclamarlo, porque esa dirección ahora es de la cuenta que entra por su `sub`. No se borra solo; el owner lo puede dar de baja.
 
-5. Se crea la sesión y se devuelve la cookie.
+6. Se crea la sesión y se devuelve la cookie. La respuesta del login, salga bien o mal, borra la cookie del nonce: cada nonce sirve para un solo intento.
+
+**Qué cubre el `nonce`:** un ID token vale alrededor de una hora, y la firma de Google no impide que lo use otro. Con el nonce, el token solo sirve en el navegador que tiene la cookie que le dio origen: uno robado (por una extensión, un log del front, un error que lo exponga) no se puede reusar desde otro lado. También impide que otro sitio loguee al navegador con una cuenta ajena, porque el token del atacante no coincide con la cookie de la víctima. No hace falta tabla ni clave de firma: otro sitio no puede plantar una cookie `__Host-`, y en la cookie va el secreto, no el nonce. Si el panel queda abierto más de 15 minutos, el login falla con `401 token_invalido` y el front pide un nonce nuevo y reintenta.
 
 Un local suspendido no impide el login: la suspensión se chequea al escribir. La sesión es del usuario, no del local, así que si algún día un usuario tiene más de un local, alcanza con sumar un "elegir local".
 
@@ -405,7 +409,7 @@ Mismas reglas de salida que la consola de la 1a.
 
 ### Pruebas de la 1b
 
-- **Unitarias:** `Sesion` (tope absoluto, días sin uso, registro de uso a lo sumo cada hora) con reloj y generador de tokens fijos; `ingresar_con` en sus tres casos; el middleware de `Origin` (ausente, `null`, otro puerto, otro esquema, permitido).
+- **Unitarias:** `Sesion` (tope absoluto, días sin uso, registro de uso a lo sumo cada hora) con reloj y generador de tokens fijos; `ingresar_con` en sus tres casos; el middleware de `Origin` (ausente, `null`, otro puerto, otro esquema, permitido); el adaptador de Google rechaza un token sin `nonce`, con otro `nonce` o sin cookie.
 - **Integración** (PostgreSQL real, con el mismo estándar que la 1a):
   - las políticas de `membresias`: se lee sin local fijado, no se escribe sin local ni con el de otro, no se borra;
   - el alta del admin es atómica: si falla la membresía, no queda el usuario;
@@ -413,7 +417,7 @@ Mismas reglas de salida que la consola de la 1a.
   - un admin no ve ni modifica nada de otro local, aunque mande otro id;
   - el `UPDATE` del último uso no se pisa con dos requests simultáneas;
   - `obtener` con una versión esperada distinta de la guardada lanza `LocalModificadoEnParalelo`.
-- **API:** el login responde el mismo `403 usuario_no_habilitado` para un email desconocido y para uno que solo coincide con un usuario vinculado a otro `sub` (que no se pueda averiguar quién está dado de alta); un error de `google-auth` nunca da 500; una sesión vencida da 401 y borra la cookie; logout sin sesión da 204; una escritura del panel sin `If-Match` da 428 y con una versión vieja da 409 (el caso de la compu y el celular); la respuesta de una escritura trae el `ETag` nuevo.
+- **API:** el login responde el mismo `403 usuario_no_habilitado` para un email desconocido y para uno que solo coincide con un usuario vinculado a otro `sub` (que no se pueda averiguar quién está dado de alta); un error de `google-auth` nunca da 500; una sesión vencida da 401 y borra la cookie; logout sin sesión da 204; una escritura del panel sin `If-Match` da 428 y con una versión vieja da 409 (el caso de la compu y el celular); la respuesta de una escritura trae el `ETag` nuevo; un login sin la cookie del nonce da 401, y la cookie se borra en la respuesta del login aunque falle.
 
 ## Errores
 
@@ -432,8 +436,7 @@ Las categorías `NoAutenticado` (401) y `AccesoDenegado` (403) se suman en `comp
 
 ## Pendientes
 
-Resueltos el 2026-11-13 (ver Decisiones tomadas): restricción de exclusión (no va), regla del WhatsApp, próxima apertura y Sección 4 de la 1a. Resueltos el 2026-11-14 (revisión del diseño de la 1b): políticas de `membresias`, unidades de trabajo de Identidad, resolución de la sesión del panel, mecanismo del límite de subida y unicidad del email de `usuarios` (único solo entre pendientes; ver Login con Google), reparto de la sesión, `sesiones` y su purga, `Origin`, adaptador de Google, vista del panel, suspensión antes de procesar imágenes, pruebas de la 1b, bloqueo entre solicitudes con `ETag`/`If-Match` obligatorio y cookie `__Host-` también en desarrollo (ver Decisiones tomadas).
+Resueltos el 2026-11-13 (ver Decisiones tomadas): restricción de exclusión (no va), regla del WhatsApp, próxima apertura y Sección 4 de la 1a. Resueltos el 2026-11-14 (revisión del diseño de la 1b): políticas de `membresias`, unidades de trabajo de Identidad, resolución de la sesión del panel, mecanismo del límite de subida y unicidad del email de `usuarios` (único solo entre pendientes; ver Login con Google), reparto de la sesión, `sesiones` y su purga, `Origin`, adaptador de Google, vista del panel, suspensión antes de procesar imágenes, pruebas de la 1b, bloqueo entre solicitudes con `ETag`/`If-Match` obligatorio y cookie `__Host-` también en desarrollo (ver Decisiones tomadas), y `nonce` en el login (entra en la 1b: no se vuelve a tocar auth).
 
-1. **`nonce` en el login con Google** (1b): fuera del MVP, queda como mejora.
-2. **Sección 4 de la 1b:** los cuerpos de los endpoints del panel y de auth (lo demás ya está en la Sección 4 de la 1b).
-3. **Plan de implementación** de la 1b. Su primera tarea: que `composicion.py` deje de importar `minutas.api.rutas_publicas` (hoy la raíz de composición depende de la capa HTTP), antes de que la 1b sume routers.
+1. **Sección 4 de la 1b:** los cuerpos de los endpoints del panel y de auth (lo demás ya está en la Sección 4 de la 1b).
+2. **Plan de implementación** de la 1b. Su primera tarea: que `composicion.py` deje de importar `minutas.api.rutas_publicas` (hoy la raíz de composición depende de la capa HTTP), antes de que la 1b sume routers.

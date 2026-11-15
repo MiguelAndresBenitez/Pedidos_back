@@ -168,6 +168,7 @@ La API es REST bajo `/api/v1`, en JSON, con OpenAPI generado por FastAPI y tres 
 
 | Método | Ruta | Para qué |
 | --- | --- | --- |
+| POST | `/auth/nonce` | Entrega el `nonce` del login y su cookie |
 | POST | `/auth/google` | Recibe el ID token de Google y crea la sesión |
 | POST | `/auth/logout` | Revoca la sesión |
 | GET | `/auth/me` | Usuario y local de la sesión |
