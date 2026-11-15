@@ -192,9 +192,11 @@ La API es REST bajo `/api/v1`, en JSON, con OpenAPI generado por FastAPI y tres 
 
 | Método | Ruta | Para qué |
 | --- | --- | --- |
-| GET, PATCH | `/panel/local` | Datos, branding, modalidades, hora de corte (la zona horaria la cambia solo el owner por consola) |
+| GET | `/panel/local` | El local como lo ve el panel (la zona horaria la cambia solo el owner por consola) |
+| PUT | `/panel/local/datos` | Datos, branding y modalidades (formulario entero) |
+| PUT | `/panel/local/hora-de-corte` | Cambiar la hora de corte desde la próxima jornada |
 | PUT | `/panel/local/horarios` | Reemplazar las franjas semanales |
-| POST | `/panel/local/cierre-manual` | Cerrar o reabrir la tienda |
+| PUT, DELETE | `/panel/local/cierre-manual` | Cerrar la tienda (por hoy o hasta nuevo aviso) y reabrirla |
 | POST | `/panel/local/logo`, `/panel/local/portada` | Subir imágenes |
 | GET, POST | `/panel/categorias` | Listar y crear |
 | PATCH, DELETE | `/panel/categorias/{id}` | Editar y borrar (lógico) |

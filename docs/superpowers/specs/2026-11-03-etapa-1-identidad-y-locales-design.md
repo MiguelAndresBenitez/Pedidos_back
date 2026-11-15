@@ -383,15 +383,69 @@ Del owner: `DarDeAltaLocal`, `CambiarSlug`, `CambiarZonaHoraria`, `SuspenderLoca
 
 ## Sección 4 (1b): entradas, errores y pruebas
 
-Los cuerpos de los endpoints del panel y de auth quedan pendientes (ver Pendientes). Lo que ya está decidido:
+Todos los cuerpos siguen la convención del spec general (sin sobre, `snake_case`, instantes en UTC con `Z`, horas como `"HH:MM"`, enumerados como texto, `null` explícito).
+
+### Auth
+
+| Ruta | Request | Respuesta |
+| --- | --- | --- |
+| `POST /auth/nonce` | sin cuerpo | `200 {"nonce": "<sha-256 en hex>"}` y la cookie `__Host-nonce_de_login` |
+| `POST /auth/google` | `{"credencial": "<id token>"}` | `200`, el mismo cuerpo que `/auth/me`, la cookie de sesión, y borra la del nonce |
+| `GET /auth/me` | — | `200 {"usuario_id": "0193…", "email": "juan@laesquina.com", "rol": "admin"}` |
+| `POST /auth/logout` | sin cuerpo | `204` (también sin sesión) |
+
+`/auth/me` no trae datos del local, porque Identidad no conoce Locales: el panel pide `GET /panel/local` a continuación y de ahí saca el nombre y el slug.
 
 ### Panel
+
+**La vista** (`GET /panel/local`, y la respuesta de toda escritura del panel), siempre con `ETag`:
+
+```json
+{
+  "estado": "activo",
+  "slug": "la-esquina",
+  "nombre": "La Esquina",
+  "descripcion": "Pizzas a la piedra",
+  "direccion": null,
+  "whatsapp": "5491155551234",
+  "color": "#ff6600",
+  "modalidades": ["delivery", "retiro"],
+  "zona_horaria": "America/Argentina/Buenos_Aires",
+  "hora_de_corte": "04:00",
+  "cambio_pendiente": {"zona_horaria": "America/Argentina/Buenos_Aires", "hora_de_corte": "05:00", "desde_jornada": "2026-11-17"},
+  "horarios": [{"dia": "viernes", "apertura": "19:00", "cierre": "01:30"}],
+  "cierre_manual": {"tipo": "por_hoy", "jornada": "2026-11-15"},
+  "logo_url": "https://minutas.app/api/v1/imagenes/0193….webp",
+  "portada_url": null,
+  "abierto_ahora": false,
+  "proxima_apertura": "2026-11-16T22:00:00Z"
+}
+```
+
+- `cambio_pendiente` y `cierre_manual` son `null` cuando no hay; `jornada` es `null` salvo en el cierre `por_hoy`.
+- Una franja con `cierre` menor que `apertura` cruza la medianoche, como en el dominio.
+- Suspendido: `200 {"estado": "suspendido", "slug": "la-esquina", "nombre": "La Esquina"}`, lo justo para el aviso.
+
+**Escrituras:** todas exigen `If-Match` y responden `200` con la vista completa y el `ETag` nuevo, así el front redibuja con la respuesta y lo calculado (abierto ahora, cambio pendiente) sale siempre del backend. Los casos de uso del panel devuelven la vista y la versión, no el `Local` (cambio sobre el código de la 1a).
+
+| Ruta | Request | Caso de uso |
+| --- | --- | --- |
+| `PUT /panel/local/datos` | `{"nombre", "descripcion", "direccion", "whatsapp", "color", "modalidades"}`, todos presentes; `descripcion` y `direccion` admiten `null`; `whatsapp` en texto libre (`"11 5555-1234"`), normalizado con `Whatsapp.desde_texto` | `ActualizarDatosDelLocal` |
+| `PUT /panel/local/hora-de-corte` | `{"hora_de_corte": "05:00"}` (rige desde la próxima jornada: la respuesta lo muestra en `cambio_pendiente`) | `CambiarHoraDeCorte` |
+| `PUT /panel/local/horarios` | `{"franjas": [{"dia": "lunes", "apertura": "19:00", "cierre": "23:30"}]}` (objeto, no array suelto, también en el request) | `ReemplazarHorario` |
+| `PUT /panel/local/cierre-manual` | `{"tipo": "por_hoy"}` o `{"tipo": "hasta_nuevo_aviso"}` | `CerrarManualmente` |
+| `DELETE /panel/local/cierre-manual` | sin cuerpo (reabre) | `Reabrir` |
+| `POST /panel/local/logo`, `/portada` | multipart con un único campo, `archivo` | `SubirImagenDelLocal` |
+
+- **Datos con `PUT` y formulario entero, no `PATCH`:** el caso de uso ya recibe los datos completos y el panel los edita en un solo formulario; un `PATCH` parcial exigiría lógica de fusión y la distinción `null`/ausente por campo, y el `If-Match` ya protege contra pisar cambios ajenos.
+- **La hora de corte en su propia ruta:** es otro caso de uso, con su regla de "desde la próxima jornada"; en el mismo cuerpo que los datos, una request ejecutaría dos casos de uso.
+- **El cierre manual es un recurso:** `PUT` lo pone y `DELETE` lo saca.
 
 - Todas las rutas cuelgan del router `/api/v1/panel`, que depende de `ObtenerSesionVigente` (ver Flujos de acceso).
 - **`ObtenerLocalDelPanel` devuelve una vista, no el agregado:** `PanelDisponible` (todo lo que el panel muestra, ya calculado, y la versión) o `PanelSuspendido` (solo el aviso), igual que `ObtenerTienda`. La API se limita a traducirla. (Cambio sobre el código de la 1a, que hoy devuelve el `Local`.)
 - **`ETag` / `If-Match`:**
   - `GET /panel/local` responde con `ETag: "<versión>"` (fuerte; es la versión del local, no un hash del cuerpo).
-  - Toda escritura del panel (`PATCH /panel/local`, `PUT /panel/local/horarios`, `POST /panel/local/cierre-manual`, las subidas de imágenes) exige `If-Match` con esa versión. Sin la cabecera: `428 version_requerida`. Con otra versión: `409 local_modificado_en_paralelo` (el mismo error que el bloqueo dentro de la transacción, así el front tiene un solo caso: "cambiaron el local, recargá").
+  - Toda escritura del panel (las de la tabla de arriba) exige `If-Match` con esa versión. Sin la cabecera: `428 version_requerida`. Con otra versión: `409 local_modificado_en_paralelo` (el mismo error que el bloqueo dentro de la transacción, así el front tiene un solo caso: "cambiaron el local, recargá").
   - Toda escritura exitosa responde con el `ETag` nuevo.
   - Una sola versión cubre todo el local: cambiar el logo invalida un formulario de horarios abierto. Es un 409 de más en un caso raro, y se acepta.
   - En las subidas, `If-Match` se valida junto con la sesión, antes de leer el cuerpo.
@@ -436,7 +490,6 @@ Las categorías `NoAutenticado` (401) y `AccesoDenegado` (403) se suman en `comp
 
 ## Pendientes
 
-Resueltos el 2026-11-13 (ver Decisiones tomadas): restricción de exclusión (no va), regla del WhatsApp, próxima apertura y Sección 4 de la 1a. Resueltos el 2026-11-14 (revisión del diseño de la 1b): políticas de `membresias`, unidades de trabajo de Identidad, resolución de la sesión del panel, mecanismo del límite de subida y unicidad del email de `usuarios` (único solo entre pendientes; ver Login con Google), reparto de la sesión, `sesiones` y su purga, `Origin`, adaptador de Google, vista del panel, suspensión antes de procesar imágenes, pruebas de la 1b, bloqueo entre solicitudes con `ETag`/`If-Match` obligatorio y cookie `__Host-` también en desarrollo (ver Decisiones tomadas), y `nonce` en el login (entra en la 1b: no se vuelve a tocar auth).
+Resueltos el 2026-11-13 (ver Decisiones tomadas): restricción de exclusión (no va), regla del WhatsApp, próxima apertura y Sección 4 de la 1a. Resueltos el 2026-11-14 (revisión del diseño de la 1b): políticas de `membresias`, unidades de trabajo de Identidad, resolución de la sesión del panel, mecanismo del límite de subida y unicidad del email de `usuarios` (único solo entre pendientes; ver Login con Google), reparto de la sesión, `sesiones` y su purga, `Origin`, adaptador de Google, vista del panel, suspensión antes de procesar imágenes, pruebas de la 1b, bloqueo entre solicitudes con `ETag`/`If-Match` obligatorio y cookie `__Host-` también en desarrollo (ver Decisiones tomadas), y `nonce` en el login (entra en la 1b: no se vuelve a tocar auth). Resuelto el 2026-11-15: Sección 4 de la 1b con los cuerpos de auth y del panel.
 
-1. **Sección 4 de la 1b:** los cuerpos de los endpoints del panel y de auth, con la forma que fija la convención de cuerpos del spec general (lo demás ya está en la Sección 4 de la 1b).
-2. **Plan de implementación** de la 1b. Su primera tarea: que `composicion.py` deje de importar `minutas.api.rutas_publicas` (hoy la raíz de composición depende de la capa HTTP), antes de que la 1b sume routers. Otra tarea temprana: `GET /tiendas/{slug}` devuelve hoy el día de las franjas como número (`DiaDeLaSemana` es un `IntEnum`); pasa a código de texto (`"lunes"`), según la convención de cuerpos del spec general.
+1. **Plan de implementación** de la 1b. Su primera tarea: que `composicion.py` deje de importar `minutas.api.rutas_publicas` (hoy la raíz de composición depende de la capa HTTP), antes de que la 1b sume routers. Otra tarea temprana: `GET /tiendas/{slug}` devuelve hoy el día de las franjas como número (`DiaDeLaSemana` es un `IntEnum`); pasa a código de texto (`"lunes"`), según la convención de cuerpos del spec general.
