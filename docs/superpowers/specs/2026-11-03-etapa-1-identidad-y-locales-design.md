@@ -33,7 +33,7 @@ La 1a es dominio puro y de bajo riesgo; la 1b suma lo que depende de Google, coo
 | Sesiones | Cookie `__Host-sesion` `HttpOnly` con token opaco; vencen tras 7 días sin uso y a los 30 días sí o sí. CSRF: `SameSite=Lax` + `Origin` permitido en toda escritura. | — |
 | Despliegue | Un solo dominio (`minutas.app`, provisorio) con un proxy que reparte por ruta: `/api/*` al backend, el resto al front. Front y back en servidores distintos. | Subdominios: obliga a configurar CORS y cualquier subdominio cuenta como "mismo sitio". Dominios distintos: la cookie `Lax` no viaja. |
 | Slug | Lo fija y lo cambia solo el owner por consola. 3 a 40 caracteres `a-z 0-9 -`, único, sin palabras reservadas (`api`, `panel`, `admin`…). Las reservadas se controlan al elegir el slug (alta y cambio), no al cargarlo: la lista puede crecer sin dejar locales existentes sin poder abrirse. | Que lo cambie el admin: rompería el link publicado en redes sin querer. |
-| Aislamiento | Toda escritura exige el local fijado en la transacción, sin excepción. La única lectura sin local fijado es la de `locales`, para resolver el slug. | `locales` sin RLS: un descuido permitiría que un local escriba datos de otro. |
+| Aislamiento | Toda escritura exige el local fijado en la transacción, sin excepción. Se leen sin local fijado solo `locales`, para resolver el slug, y `membresias`, para saber de qué local es el usuario de la sesión. | `locales` sin RLS: un descuido permitiría que un local escriba datos de otro. |
 | Concurrencia | Bloqueo optimista del `Local`: columna `version`; si otro lo guardó desde que se leyó, `409 local_modificado_en_paralelo` y se recarga. | Bloqueo pesimista (`FOR UPDATE`): una lectura especial por repositorio. Nada: una edición del panel podía revertir una suspensión hecha al mismo tiempo. |
 | WhatsApp | Se interpreta con `phonenumbers` (Argentina por defecto), tiene que ser un celular y se guarda en el formato de WhatsApp (`549…`). | Regex genérico: acepta números con los que el link `wa.me` no funciona. Exigir el formato final: el admin no sabe quitar el 0 y el 15. |
 | Próxima apertura | La calcula el dominio y la devuelve la tienda pública. | Calcularla en el front: no conoce el cierre manual y anunciaría una apertura que no va a pasar. |
@@ -47,9 +47,9 @@ El backend suma dos módulos independientes, Identidad y Locales, que la API web
 - **Identidad** no importa nada de Locales: cuando da de alta un admin, consulta que el local exista a través de un puerto.
 - **El reloj es un puerto**, así horarios, jornadas y vencimientos se prueban con una hora fija.
 - **La raíz de composición** (`minutas/composicion.py`) arma los adaptadores (`Servicios`) y los casos de uso listos para usar (`CasosDeUso`); la API y la consola solo ejecutan `casos.<caso>.ejecutar(...)`.
-- **Dos unidades de trabajo:**
-  - **Del local** (fija `app.local_id`): el agregado `Local` completo (fila de `locales` y sus franjas), y después la carta y los pedidos.
-  - **De plataforma** (sin local fijado): usuarios, sesiones y la resolución del slug.
+- **Dos tipos de unidad de trabajo,** con protocolos propios de cada contexto: ninguno importa la unidad de otro.
+  - **Del local** (fija `app.local_id`): en Locales, el agregado `Local` completo (fila de `locales` y sus franjas), y después la carta y los pedidos. En Identidad, la del alta de admin: usuario y membresía en una sola transacción.
+  - **De plataforma** (sin local fijado): en Locales, la resolución del slug; en Identidad, usuarios, sesiones y la lectura de membresías.
 - **La consola del owner tiene siete comandos:** alta de local, alta de admin, cambio de slug, cambio de zona horaria, revocar sesiones, suspender local y reactivar local. Todo comando que toca un local fija ese local; en el alta, el id se genera en el dominio y se fija antes del `INSERT`. Cada comando queda registrado en el log.
 
 ## Sección 2: el dominio de Locales
@@ -203,9 +203,24 @@ El dominio no tiene ningún `if` que elija comportamiento: las variantes son cla
 
 **Guardar el `Local`** actualiza `locales` con `WHERE id = :id AND version = :version_leida` y suma uno a la versión. Si no actualizó exactamente una fila, lanza `LocalModificadoEnParalelo` (409) y no toca las franjas.
 
-**`usuarios`** (plataforma, sin RLS): `id`, `email` UNIQUE (en minúsculas), `google_sub` UNIQUE NULL, `creado_en`.
+**`usuarios`** (plataforma, sin RLS): `id`, `email` (en minúsculas), `google_sub` UNIQUE NULL, `creado_en`. El email es único solo entre los usuarios pendientes (sin `sub`): es lo que identifica a alguien hasta su primer login. Después manda el `sub`, y el email queda como un dato para mostrar que puede repetirse entre usuarios vinculados (por ejemplo, un email viejo que nadie actualizó). Ningún flujo busca usuarios vinculados por email.
 
-**`membresias`**: `usuario_id`, `local_id`, `rol` (hoy solo `admin`). Las políticas quedan pendientes (ver abajo).
+```sql
+-- No sirve UNIQUE (google_sub, email): el sub ya es único solo, y con sub NULL Postgres acepta emails repetidos.
+CREATE UNIQUE INDEX uq_usuarios_email_pendiente ON usuarios (email) WHERE google_sub IS NULL;
+```
+
+**`membresias`** (RLS por operación, como `locales`): `usuario_id` UNIQUE, `local_id` (FK a `locales`), `rol` (hoy solo `admin`), `creada_en`. Un usuario tiene un solo local: el `UNIQUE` se quita cuando exista "elegir local". La FK ignora el RLS, así que garantiza que el local exista.
+
+```sql
+-- membresias: lectura abierta (resolver el local de la sesión), escritura solo con ese local fijado, sin DELETE
+CREATE POLICY lectura_abierta    ON membresias FOR SELECT USING (true);
+CREATE POLICY alta_en_el_local   ON membresias FOR INSERT
+  WITH CHECK (local_id = current_setting('app.local_id')::uuid);
+CREATE POLICY cambio_en_el_local ON membresias FOR UPDATE
+  USING (local_id = current_setting('app.local_id')::uuid)
+  WITH CHECK (local_id = current_setting('app.local_id')::uuid);
+```
 
 **`sesiones`** (plataforma, sin RLS): `id`, `usuario_id`, `hash_del_token` (SHA-256), `creada_en`, `ultimo_uso_en`, `expira_en`, `ip`, `user_agent`.
 
@@ -228,7 +243,13 @@ Sobre `locales` no se crea política de `DELETE`: con RLS forzado, sin política
 ### Flujos de acceso
 
 - **Tienda pública:** con la unidad de plataforma se resuelve el slug y se obtiene el `local_id`; después, con la unidad del local, se carga el agregado `Local`. Las dos son de solo lectura.
-- **Panel:** el `local_id` sale de la membresía del usuario de la sesión, nunca de un parámetro del cliente.
+- **Panel:** el `local_id` sale de la membresía del usuario de la sesión, nunca de un parámetro del cliente. Lo resuelve un solo caso de uso de Identidad, `ObtenerSesionVigente.ejecutar(token, ahora) -> SesionDelPanel(usuario_id, local_id, rol)`, en una sola transacción de plataforma:
+  1. busca la sesión por el hash del token y verifica que esté vigente con el `ahora` de la solicitud (sin sesión, vencida o revocada: `401 sesion_requerida`);
+  2. lee la membresía del usuario (sin membresía: `403 usuario_no_habilitado`, el mismo error del login);
+  3. chequea el rol (`rol.asegurar_puede_administrar()`): Locales no conoce roles.
+
+  En la API, una dependencia lo ejecuta y entrega el `LocalId`; se aplica una sola vez a todo el router `/api/v1/panel` (`APIRouter(dependencies=...)`), así ninguna ruta del panel puede olvidarla. Las rutas pasan ese `LocalId` a los casos de uso de la 1a, que no cambian.
+- **Alta de admin:** `alta-admin --slug --email` resuelve el slug a `LocalId` con un puerto de Identidad (`LocalesDeLaPlataforma`), cuyo adaptador vive en `composicion.py` (único lugar que importa los dos contextos) y usa el directorio de Locales. Después, en la unidad del alta de admin (con ese local fijado), crea el usuario y su membresía en la misma transacción: o quedan los dos, o ninguno. Si ya hay un usuario pendiente con ese email, el índice `uq_usuarios_email_pendiente` lo rechaza y el repositorio lo traduce a `AdminYaInvitado` (409), como hace `SlugEnUso` con `viola_restriccion`. Un email que ya tiene un usuario vinculado sí se puede invitar: es el caso de una dirección que la empresa reasignó a otra persona.
 - **Consola:** fija el local sobre el que opera.
 
 ### Login con Google
@@ -237,16 +258,18 @@ Sobre `locales` no se crea política de `DELETE`: con RLS forzado, sin política
 2. **El puerto `VerificadorDeIdentidad`** devuelve una `IdentidadVerificada(sub, email)` o lanza `TokenInvalido`. El adaptador usa `google-auth`:
    - verifica firma, audiencia (`MINUTAS_GOOGLE_CLIENT_ID`), emisor, vencimiento y `email_verified`;
    - corre en un hilo aparte para no bloquear el loop, con caché de las claves de Google y tolerancia de unos segundos de desfase de reloj.
-3. **El usuario se resuelve en el dominio,** con dos variantes que responden a `asegurar_identidad(identidad)`: `UsuarioSinVincular`, que acepta si el email coincide y pasa a `UsuarioVinculado` guardando el `sub`, y `UsuarioVinculado`, que compara por `sub`:
+3. **El repositorio busca primero por `sub`** (`obtener_por_identidad`): si no lo encuentra, busca por email **solo entre los pendientes**. El `sub` es el identificador permanente de la cuenta de Google; el email puede cambiar (renombre en Workspace, cuentas con email que no es de Gmail) o pasar a otra persona (una dirección reasignada), así que nunca identifica a un usuario ya vinculado.
+4. **El usuario se resuelve en el dominio,** con dos variantes que responden a `ingresar_con(identidad)`: `UsuarioSinVincular`, que pasa a `UsuarioVinculado` guardando el `sub` y el email, y `UsuarioVinculado`, que actualiza el email si cambió en Google:
 
 | Situación | Resultado |
 | --- | --- |
-| Primer login: hay un usuario con ese email y sin `sub` | Se guarda el `sub`: la cuenta queda vinculada |
-| Login siguiente: se encuentra por `sub` | Entra; si el email cambió en Google, se actualiza |
-| El email coincide con un usuario que tiene otro `sub` | `usuario_no_habilitado` (403) |
-| No hay coincidencia | `usuario_no_habilitado` (403) |
+| Se encuentra por `sub` | Entra; si el email cambió en Google, se actualiza (no choca con nadie: el email solo es único entre pendientes) |
+| No hay `sub`, pero hay un usuario pendiente con ese email | Se guarda el `sub`: la cuenta queda vinculada |
+| No hay coincidencia (incluye un email que solo coincide con un usuario vinculado a otro `sub`) | `usuario_no_habilitado` (403) |
 
-4. Se crea la sesión y se devuelve la cookie.
+   Si el email nuevo de un usuario vinculado coincide con un usuario pendiente, ese pendiente queda huérfano: nadie puede reclamarlo, porque esa dirección ahora es de la cuenta que entra por su `sub`. No se borra solo; el owner lo puede dar de baja.
+
+5. Se crea la sesión y se devuelve la cookie.
 
 Un local suspendido no impide el login: la suspensión se chequea al escribir. La sesión es del usuario, no del local, así que si algún día un usuario tiene más de un local, alcanza con sumar un "elegir local".
 
@@ -277,7 +300,11 @@ minutas.app/{slug}    → front de la tienda
 
 ### Imágenes
 
-- **Subida:** `POST /api/v1/panel/local/logo` y `/portada`, en multipart. El límite de 2 MB se controla mientras se recibe el archivo, no al final.
+- **Subida:** `POST /api/v1/panel/local/logo` y `/portada`, en multipart. El límite de 2 MB se controla mientras se recibe el archivo, no al final, y recién después de validar la sesión:
+  - la ruta **no declara `UploadFile` ni `Form`**: FastAPI lee y guarda el cuerpo de un formulario antes de resolver las dependencias, así que la sesión no lo cortaría a tiempo;
+  - la ruta depende de la sesión del panel y lee `request.stream()` con un `MultipartParser` de `python-multipart`, acumulando en memoria con un contador; al pasar los 2 MB corta con `422 imagen_demasiado_grande`;
+  - un `Content-Length` mayor al límite se rechaza antes de leer;
+  - el proxy limita el cuerpo también (`client_max_body_size`), como segunda defensa.
 - **Procesamiento con Pillow, en un hilo aparte:**
   1. Abrir la imagen, lo que valida que sea un JPEG, PNG o WebP real.
   2. Tope de píxeles antes de decodificar, contra las bombas de descompresión.
@@ -339,7 +366,7 @@ Del owner: `DarDeAltaLocal`, `CambiarSlug`, `CambiarZonaHoraria`, `SuspenderLoca
 | --- | --- |
 | `slug_invalido`, `slug_reservado`, `whatsapp_invalido`, `zona_horaria_invalida`, `franja_ambigua`, `horarios_superpuestos`, `franja_corta_la_hora_de_corte`, `dato_del_local_invalido` | 422 (categoría `ReglaDeNegocioIncumplida`) |
 | `imagen_invalida`, `imagen_demasiado_grande` | 422 |
-| `slug_en_uso`, `local_modificado_en_paralelo` | 409 |
+| `slug_en_uso`, `local_modificado_en_paralelo`, `admin_ya_invitado` | 409 |
 | `local_no_encontrado`, `imagen_no_encontrada` | 404 |
 | `token_invalido`, `sesion_requerida` | 401 |
 | `usuario_no_habilitado`, `local_suspendido`, `origen_no_permitido` | 403 |
@@ -348,10 +375,9 @@ Las categorías `NoAutenticado` (401) y `AccesoDenegado` (403) se suman en `comp
 
 ## Pendientes
 
-Resueltos el 2026-11-13 (ver Decisiones tomadas): restricción de exclusión (no va), regla del WhatsApp, próxima apertura y Sección 4 de la 1a.
+Resueltos el 2026-11-13 (ver Decisiones tomadas): restricción de exclusión (no va), regla del WhatsApp, próxima apertura y Sección 4 de la 1a. Resueltos el 2026-11-14 (revisión del diseño de la 1b): políticas de `membresias`, unidades de trabajo de Identidad, resolución de la sesión del panel, mecanismo del límite de subida y unicidad del email de `usuarios` (único solo entre pendientes; ver Login con Google).
 
-1. **Políticas de `membresias`** (1b): en el login hay que leerla antes de saber el local. Propuesta a confirmar: el mismo esquema que `locales` (lectura abierta, escritura con el local fijado).
-2. **`nonce` en el login con Google** (1b): fuera del MVP, queda como mejora.
-3. **Sección 4 de la 1b:** endpoints del panel y de auth con sus cuerpos, y sus pruebas.
+1. **`nonce` en el login con Google** (1b): fuera del MVP, queda como mejora.
+2. **Sección 4 de la 1b:** endpoints del panel y de auth con sus cuerpos, y sus pruebas.
    - **Bloqueo optimista entre solicitudes:** la versión no es parte del `Local`; el repositorio la recuerda dentro de la unidad de trabajo, así que hoy el bloqueo cubre ediciones concurrentes pero no un formulario viejo (el admin carga el panel, otro guarda, y el primero envía después). Si el panel lo necesita, `GET /panel/local` devuelve la versión (por ejemplo como `ETag`), el comando la manda en `If-Match`, el caso de uso la recibe y el repositorio compara contra ella; si no coincide, `409 local_modificado_en_paralelo`.
-4. **Plan de implementación** de la 1a; después, el de la 1b.
+3. **Plan de implementación** de la 1b.
