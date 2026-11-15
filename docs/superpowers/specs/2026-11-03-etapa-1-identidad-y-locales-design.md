@@ -44,13 +44,13 @@ La 1a es dominio puro y de bajo riesgo; la 1b suma lo que depende de Google, coo
 
 El backend suma dos módulos independientes, Identidad y Locales, que la API web y la consola del owner usan por igual.
 
-- **Identidad** no importa nada de Locales: cuando da de alta un admin, consulta que el local exista a través de un puerto.
+- **Identidad** no importa nada de Locales: cuando da de alta un admin, convierte el slug en `LocalId` a través de un puerto (`LocalesDeLaPlataforma`). Que el local exista lo garantiza la clave foránea de `membresias`.
 - **El reloj es un puerto**, así horarios, jornadas y vencimientos se prueban con una hora fija.
 - **La raíz de composición** (`minutas/composicion.py`) arma los adaptadores (`Servicios`) y los casos de uso listos para usar (`CasosDeUso`); la API y la consola solo ejecutan `casos.<caso>.ejecutar(...)`.
 - **Dos tipos de unidad de trabajo,** con protocolos propios de cada contexto: ninguno importa la unidad de otro.
   - **Del local** (fija `app.local_id`): en Locales, el agregado `Local` completo (fila de `locales` y sus franjas), y después la carta y los pedidos. En Identidad, la del alta de admin: usuario y membresía en una sola transacción.
   - **De plataforma** (sin local fijado): en Locales, la resolución del slug; en Identidad, usuarios, sesiones y la lectura de membresías.
-- **La consola del owner tiene siete comandos:** alta de local, alta de admin, cambio de slug, cambio de zona horaria, revocar sesiones, suspender local y reactivar local. Todo comando que toca un local fija ese local; en el alta, el id se genera en el dominio y se fija antes del `INSERT`. Cada comando queda registrado en el log.
+- **La consola del owner tiene ocho comandos:** alta de local, alta de admin, cambio de slug, cambio de zona horaria, revocar sesiones, purgar sesiones vencidas, suspender local y reactivar local (argumentos en las Secciones 4 de la 1a y de la 1b). Todo comando que toca un local fija ese local; en el alta, el id se genera en el dominio y se fija antes del `INSERT`. Cada comando queda registrado en el log.
 
 ## Sección 2: el dominio de Locales
 
@@ -222,7 +222,7 @@ CREATE POLICY cambio_en_el_local ON membresias FOR UPDATE
   WITH CHECK (local_id = current_setting('app.local_id')::uuid);
 ```
 
-**`sesiones`** (plataforma, sin RLS): `id`, `usuario_id`, `hash_del_token` (SHA-256), `creada_en`, `ultimo_uso_en`, `expira_en`, `ip`, `user_agent`.
+**`sesiones`** (plataforma, sin RLS): `id`, `usuario_id` (FK a `usuarios`, con índice), `hash_del_token` (SHA-256, UNIQUE), `creada_en`, `ultimo_uso_en`, `expira_en` (el tope absoluto: `creada_en` + 30 días; los 7 días sin uso se calculan desde `ultimo_uso_en`), `ip` (`inet`), `user_agent` (truncado a 512 caracteres).
 
 ### Políticas de RLS
 
@@ -256,8 +256,9 @@ Sobre `locales` no se crea política de `DELETE`: con RLS forzado, sin política
 
 1. El panel obtiene un ID token con el botón de Google y lo envía a `POST /api/v1/auth/google`.
 2. **El puerto `VerificadorDeIdentidad`** devuelve una `IdentidadVerificada(sub, email)` o lanza `TokenInvalido`. El adaptador usa `google-auth`:
-   - verifica firma, audiencia (`MINUTAS_GOOGLE_CLIENT_ID`), emisor, vencimiento y `email_verified`;
-   - corre en un hilo aparte para no bloquear el loop, con caché de las claves de Google y tolerancia de unos segundos de desfase de reloj.
+   - verifica firma, audiencia (`MINUTAS_GOOGLE_CLIENT_ID`), emisor y vencimiento; `email_verified` no lo chequea la librería, así que el adaptador lo exige a mano;
+   - corre en un hilo aparte para no bloquear el loop, con tolerancia de unos segundos de desfase de reloj. El caché de las claves públicas de Google no viene activado: el adaptador usa un transporte con caché (por ejemplo `CacheControl` sobre `requests`) para no pedirlas en cada login;
+   - **ningún error de `google-auth` sale como 500:** un token malformado, vencido o con firma inválida es `TokenInvalido` (401); si no se pueden obtener las claves de Google (red caída, timeout), es `ServicioDeGoogleNoDisponible` (503), para que el front muestre "probá en un rato" y no "tu cuenta no sirve".
 3. **El repositorio busca primero por `sub`** (`obtener_por_identidad`): si no lo encuentra, busca por email **solo entre los pendientes**. El `sub` es el identificador permanente de la cuenta de Google; el email puede cambiar (renombre en Workspace, cuentas con email que no es de Gmail) o pasar a otra persona (una dirección reasignada), así que nunca identifica a un usuario ya vinculado.
 4. **El usuario se resuelve en el dominio,** con dos variantes que responden a `ingresar_con(identidad)`: `UsuarioSinVincular`, que pasa a `UsuarioVinculado` guardando el `sub` y el email, y `UsuarioVinculado`, que actualiza el email si cambió en Google:
 
@@ -279,11 +280,20 @@ Un local suspendido no impide el login: la suspensión se chequea al escribir. L
 Set-Cookie: __Host-sesion=<token>; HttpOnly; Secure; SameSite=Lax; Path=/; Max-Age=2592000
 ```
 
-- **El token:** `secrets.token_urlsafe(32)`, 256 bits. En la base se guarda solo su SHA-256.
-- **Vencimiento:** 7 días sin uso y 30 días como tope absoluto, configurables por variables de entorno. El `Max-Age` de la cookie es el tope; los 7 días sin uso los controla el servidor.
-- **El último uso** se actualiza como mucho una vez por hora.
-- **Logout:** borra la fila y devuelve la cookie con `Max-Age=0`. La consola puede revocar todas las sesiones de un usuario.
+- **El token:** lo genera un puerto `GeneradorDeTokens` (el adaptador usa `secrets.token_urlsafe(32)`, 256 bits; los tests inyectan uno fijo). En la base se guarda solo su SHA-256.
+- **Vencimiento:** 7 días sin uso y 30 días como tope absoluto. Los plazos viven en un objeto de valor `PoliticaDeSesiones`, que arma `composicion.py` desde la configuración: el dominio no lee variables de entorno. El `Max-Age` de la cookie es el tope; los 7 días sin uso los controla el servidor.
+- **La entidad `Sesion`** decide su vigencia: `Sesion.iniciar(usuario_id, token, ahora, politica)`, `asegurar_vigente(ahora)` (lanza `SesionRequerida` si pasó el tope o los días sin uso) y `registrar_uso(ahora)`.
+- **El último uso** se actualiza como mucho una vez por hora, con una sentencia que no se pisa entre requests simultáneas: `UPDATE sesiones SET ultimo_uso_en = :ahora WHERE id = :id AND ultimo_uso_en < :ahora - interval '1 hour'`.
+- **Casos de uso separados,** sin un servicio que lo haga todo: `IniciarSesionConGoogle` (login), `ObtenerSesionVigente` (cada request del panel), `CerrarSesion` (logout), `RevocarSesiones` (consola, todas las de un usuario) y `PurgarSesionesVencidas` (consola).
+- **Logout:** borra la fila y devuelve la cookie con `Max-Age=0`. Sin sesión, o con una ya vencida, responde igual `204`: cerrar sesión es idempotente.
+- **Sesión vencida o revocada:** `401 sesion_requerida`, y la respuesta también borra la cookie (`Max-Age=0`), para que el navegador no la siga mandando.
+- **Purga:** las sesiones vencidas se rechazan al validar, y el comando `purgar-sesiones` borra las que ya pasaron su vencimiento (se programa con cron en el servidor).
+- **Logs:** nunca se registran la cookie, el token ni su hash; el middleware de solicitud no vuelca cabeceras.
 - **CSRF:** un middleware exige que toda request `POST`, `PUT`, `PATCH` o `DELETE` traiga una cabecera `Origin` que esté en `MINUTAS_ORIGENES_PERMITIDOS`; si no, responde `403 origen_no_permitido`. Ningún `GET` modifica datos.
+  - `Origin` ausente o `null` se rechaza;
+  - la comparación es exacta contra cada origen permitido (esquema, host y puerto), sin prefijos ni comodines;
+  - cubre también `POST /auth/google`, para que otro sitio no pueda loguear al navegador con una cuenta ajena;
+  - se registra dentro del middleware de solicitud, así el 403 sale en `problem+json` con su `request_id`.
 
 ### Despliegue detrás del proxy
 
@@ -305,6 +315,7 @@ minutas.app/{slug}    → front de la tienda
   - la ruta depende de la sesión del panel y lee `request.stream()` con un `MultipartParser` de `python-multipart`, acumulando en memoria con un contador; al pasar los 2 MB corta con `422 imagen_demasiado_grande`;
   - un `Content-Length` mayor al límite se rechaza antes de leer;
   - el proxy limita el cuerpo también (`client_max_body_size`), como segunda defensa.
+- **Primero la suspensión, después Pillow:** `SubirImagenDelLocal` abre una unidad de solo lectura, carga el local y llama a `asegurar_modificable()` antes de procesar. Un local suspendido recibe `403 local_suspendido` sin gastar CPU en la imagen. La unidad de escritura lo vuelve a chequear al guardar, por si lo suspendieron mientras se procesaba. (Cambio sobre el código de la 1a, que hoy procesa antes de chequear.)
 - **Procesamiento con Pillow, en un hilo aparte:**
   1. Abrir la imagen, lo que valida que sea un JPEG, PNG o WebP real.
   2. Tope de píxeles antes de decodificar, contra las bombas de descompresión.
@@ -360,6 +371,36 @@ Del owner: `DarDeAltaLocal`, `CambiarSlug`, `CambiarZonaHoraria`, `SuspenderLoca
 
 `SecretStr` para las URLs de conexión, logs de uvicorn en JSON, `cast` en lugar de los `# type: ignore` de los tests, un job de CI que levante Compose y `--proxy-headers` en el arranque de uvicorn.
 
+## Sección 4 (1b): entradas, errores y pruebas
+
+Los cuerpos de los endpoints del panel y de auth quedan pendientes (ver Pendientes). Lo que ya está decidido:
+
+### Panel
+
+- Todas las rutas cuelgan del router `/api/v1/panel`, que depende de `ObtenerSesionVigente` (ver Flujos de acceso).
+- **`ObtenerLocalDelPanel` devuelve una vista, no el agregado:** `PanelDisponible` (todo lo que el panel muestra, ya calculado) o `PanelSuspendido` (solo el aviso), igual que `ObtenerTienda`. La API se limita a traducirla. (Cambio sobre el código de la 1a, que hoy devuelve el `Local`.)
+
+### Consola de la 1b
+
+| Comando | Argumentos |
+| --- | --- |
+| `alta-admin` | `--slug --email` |
+| `revocar-sesiones` | `--email` (del usuario vinculado o pendiente; si el email está repetido entre vinculados, pide `--usuario-id`) |
+| `purgar-sesiones` | sin argumentos |
+
+Mismas reglas de salida que la consola de la 1a.
+
+### Pruebas de la 1b
+
+- **Unitarias:** `Sesion` (tope absoluto, días sin uso, registro de uso a lo sumo cada hora) con reloj y generador de tokens fijos; `ingresar_con` en sus tres casos; el middleware de `Origin` (ausente, `null`, otro puerto, otro esquema, permitido).
+- **Integración** (PostgreSQL real, con el mismo estándar que la 1a):
+  - las políticas de `membresias`: se lee sin local fijado, no se escribe sin local ni con el de otro, no se borra;
+  - el alta del admin es atómica: si falla la membresía, no queda el usuario;
+  - el índice `uq_usuarios_email_pendiente`: dos pendientes con el mismo email chocan; un vinculado y un pendiente, no;
+  - un admin no ve ni modifica nada de otro local, aunque mande otro id;
+  - el `UPDATE` del último uso no se pisa con dos requests simultáneas.
+- **API:** el login responde el mismo `403 usuario_no_habilitado` para un email desconocido y para uno que solo coincide con un usuario vinculado a otro `sub` (que no se pueda averiguar quién está dado de alta); un error de `google-auth` nunca da 500; una sesión vencida da 401 y borra la cookie; logout sin sesión da 204.
+
 ## Errores
 
 | Error | Respuesta |
@@ -368,16 +409,17 @@ Del owner: `DarDeAltaLocal`, `CambiarSlug`, `CambiarZonaHoraria`, `SuspenderLoca
 | `imagen_invalida`, `imagen_demasiado_grande` | 422 |
 | `slug_en_uso`, `local_modificado_en_paralelo`, `admin_ya_invitado` | 409 |
 | `local_no_encontrado`, `imagen_no_encontrada` | 404 |
-| `token_invalido`, `sesion_requerida` | 401 |
+| `token_invalido`, `sesion_requerida` (además borra la cookie) | 401 |
+| `servicio_de_google_no_disponible` | 503 |
 | `usuario_no_habilitado`, `local_suspendido`, `origen_no_permitido` | 403 |
 
 Las categorías `NoAutenticado` (401) y `AccesoDenegado` (403) se suman en `compartido/dominio/errores.py`, con su entrada en `ESTADOS_POR_CATEGORIA`, ya en la 1a: `LocalSuspendido` es un `AccesoDenegado`.
 
 ## Pendientes
 
-Resueltos el 2026-11-13 (ver Decisiones tomadas): restricción de exclusión (no va), regla del WhatsApp, próxima apertura y Sección 4 de la 1a. Resueltos el 2026-11-14 (revisión del diseño de la 1b): políticas de `membresias`, unidades de trabajo de Identidad, resolución de la sesión del panel, mecanismo del límite de subida y unicidad del email de `usuarios` (único solo entre pendientes; ver Login con Google).
+Resueltos el 2026-11-13 (ver Decisiones tomadas): restricción de exclusión (no va), regla del WhatsApp, próxima apertura y Sección 4 de la 1a. Resueltos el 2026-11-14 (revisión del diseño de la 1b): políticas de `membresias`, unidades de trabajo de Identidad, resolución de la sesión del panel, mecanismo del límite de subida y unicidad del email de `usuarios` (único solo entre pendientes; ver Login con Google), reparto de la sesión, `sesiones` y su purga, `Origin`, adaptador de Google, vista del panel, suspensión antes de procesar imágenes y pruebas de la 1b.
 
 1. **`nonce` en el login con Google** (1b): fuera del MVP, queda como mejora.
-2. **Sección 4 de la 1b:** endpoints del panel y de auth con sus cuerpos, y sus pruebas.
+2. **Sección 4 de la 1b:** los cuerpos de los endpoints del panel y de auth (lo demás ya está en la Sección 4 de la 1b).
    - **Bloqueo optimista entre solicitudes:** la versión no es parte del `Local`; el repositorio la recuerda dentro de la unidad de trabajo, así que hoy el bloqueo cubre ediciones concurrentes pero no un formulario viejo (el admin carga el panel, otro guarda, y el primero envía después). Si el panel lo necesita, `GET /panel/local` devuelve la versión (por ejemplo como `ETag`), el comando la manda en `If-Match`, el caso de uso la recibe y el repositorio compara contra ella; si no coincide, `409 local_modificado_en_paralelo`.
-3. **Plan de implementación** de la 1b.
+3. **Plan de implementación** de la 1b. Su primera tarea: que `composicion.py` deje de importar `minutas.api.rutas_publicas` (hoy la raíz de composición depende de la capa HTTP), antes de que la 1b sume routers.

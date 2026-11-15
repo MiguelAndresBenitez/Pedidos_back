@@ -176,7 +176,7 @@ La API es REST bajo `/api/v1`, en JSON, con OpenAPI generado por FastAPI y tres 
 
 | Método | Ruta | Para qué |
 | --- | --- | --- |
-| GET, PATCH | `/panel/local` | Datos, branding, modalidades, zona horaria, hora de corte |
+| GET, PATCH | `/panel/local` | Datos, branding, modalidades, hora de corte (la zona horaria la cambia solo el owner por consola) |
 | PUT | `/panel/local/horarios` | Reemplazar las franjas semanales |
 | POST | `/panel/local/cierre-manual` | Cerrar o reabrir la tienda |
 | POST | `/panel/local/logo`, `/panel/local/portada` | Subir imágenes |
