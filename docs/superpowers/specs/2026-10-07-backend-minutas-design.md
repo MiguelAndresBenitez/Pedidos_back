@@ -151,8 +151,23 @@ La API es REST bajo `/api/v1`, en JSON, con OpenAPI generado por FastAPI y tres 
 **Convenciones**
 
 - Precios en pesos argentinos como enteros.
-- Errores en `application/problem+json` (RFC 9457) con un `code` del dominio: `tienda_cerrada`, `seleccion_invalida`, `transicion_invalida`, `limite_de_pedidos`, etc.
+- Errores en `application/problem+json` (RFC 9457) con un `code` del dominio: `tienda_cerrada`, `seleccion_invalida`, `transicion_invalida`, `limite_de_pedidos`, etc. Los errores no comparten forma con las respuestas exitosas.
 - Listados con paginación por cursor sobre el UUIDv7.
+
+**Forma de los cuerpos** (igual en todos los endpoints; decidido el 2026-11-15)
+
+- **Sin sobre:** una respuesta exitosa es el recurso mismo, en la raíz (`GET /panel/local` → `{"nombre": ..., "color": ...}`). Nada de `{"data": ...}`: el resultado ya lo dice el código HTTP, los errores van en `problem+json` y los metadatos de HTTP en cabeceras (`ETag`, `Location`).
+- **Listados:** siempre un objeto, nunca un array suelto, para poder sumar campos sin romper al cliente: `{"elementos": [...], "siguiente": "<cursor>" | null}`. `siguiente` se manda en `?despues=<cursor>`; `null` es la última página.
+- **Requests planos:** el cuerpo trae los campos del recurso, sin sobre.
+- **Nombres:** `snake_case` y en castellano, el vocabulario del dominio.
+- **Valores:**
+  - instantes en ISO 8601, en UTC y con `Z` (`2026-11-15T22:00:00Z`);
+  - horas del local como `"HH:MM"`, y fechas de jornada como `"AAAA-MM-DD"`;
+  - ids como texto (UUID);
+  - precios como enteros;
+  - valores enumerados como códigos de texto en `snake_case` (`"delivery"`, `"hasta_nuevo_aviso"`, `"lunes"`), nunca como números: un número obliga al cliente a conocer la numeración (en JavaScript, `getDay()` empieza el domingo; en Python, `weekday()` empieza el lunes).
+- **Vacíos:** en una respuesta, un campo sin valor viene como `null`, no se omite. En un `PATCH`, un campo ausente no se toca y uno en `null` se borra (si el campo admite vacío; si no, `422`).
+- **Sin cuerpo:** las acciones que no devuelven nada responden `204` (por ejemplo, el logout).
 - Todos los borrados son lógicos salvo el de sesiones (ver abajo).
 
 **Tienda pública** (sin login; el local se resuelve por slug)
@@ -168,6 +183,7 @@ La API es REST bajo `/api/v1`, en JSON, con OpenAPI generado por FastAPI y tres 
 
 | Método | Ruta | Para qué |
 | --- | --- | --- |
+| POST | `/auth/nonce` | Entrega el `nonce` del login y su cookie |
 | POST | `/auth/google` | Recibe el ID token de Google y crea la sesión |
 | POST | `/auth/logout` | Revoca la sesión |
 | GET | `/auth/me` | Usuario y local de la sesión |
@@ -176,9 +192,11 @@ La API es REST bajo `/api/v1`, en JSON, con OpenAPI generado por FastAPI y tres 
 
 | Método | Ruta | Para qué |
 | --- | --- | --- |
-| GET, PATCH | `/panel/local` | Datos, branding, modalidades, zona horaria, hora de corte |
+| GET | `/panel/local` | El local como lo ve el panel (la zona horaria la cambia solo el owner por consola) |
+| PUT | `/panel/local/datos` | Datos, branding y modalidades (formulario entero) |
+| PUT | `/panel/local/hora-de-corte` | Cambiar la hora de corte desde la próxima jornada |
 | PUT | `/panel/local/horarios` | Reemplazar las franjas semanales |
-| POST | `/panel/local/cierre-manual` | Cerrar o reabrir la tienda |
+| PUT, DELETE | `/panel/local/cierre-manual` | Cerrar la tienda (por hoy o hasta nuevo aviso) y reabrirla |
 | POST | `/panel/local/logo`, `/panel/local/portada` | Subir imágenes |
 | GET, POST | `/panel/categorias` | Listar y crear |
 | PATCH, DELETE | `/panel/categorias/{id}` | Editar y borrar (lógico) |
