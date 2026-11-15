@@ -30,8 +30,9 @@ La 1a es dominio puro y de bajo riesgo; la 1b suma lo que depende de Google, coo
 | Logo y portada | Disco, detrás del puerto `AlmacenDeImagenes`, servidas por la API con caché permanente; S3 + CDN entra después como otro adaptador. Se re-codifican a WebP con tamaño máximo. | Guardar el original: puede traer el GPS de la foto y pesar de más. Servirlas desde el proxy: obliga a compartir disco entre servidores. |
 | Instancias | Una sola instancia de la API mientras las imágenes estén en disco. Antes de escalar, se pasa a S3. | — |
 | Login | Botón de Google en el panel; el backend verifica el ID token con `google-auth`. Solo entra quien el owner dio de alta. El primer login vincula la cuenta de Google (`sub`); los siguientes se buscan por `sub`. | Flujo con redirección y client secret: más código y un secreto que guardar. Identificar solo por email: el email de una cuenta de Google puede cambiar o reasignarse. |
-| Sesiones | Cookie `__Host-sesion` `HttpOnly` con token opaco; vencen tras 7 días sin uso y a los 30 días sí o sí. CSRF: `SameSite=Lax` + `Origin` permitido en toda escritura. | — |
+| Sesiones | Cookie `__Host-sesion` `HttpOnly` con token opaco; vencen tras 7 días sin uso y a los 30 días sí o sí. CSRF: `SameSite=Lax` + `Origin` permitido en toda escritura. El prefijo `__Host-` (y por lo tanto `Secure`) va siempre, también en desarrollo y en los tests. | Cookie configurable por entorno (sin `Secure` en desarrollo): una configuración equivocada en producción mandaría la sesión sin protección. Chrome y Firefox aceptan `Secure` en `http://localhost`; Safari no, y el equipo no lo usa (quien lo necesite levanta el front con HTTPS local). |
 | Despliegue | Un solo dominio (`minutas.app`, provisorio) con un proxy que reparte por ruta: `/api/*` al backend, el resto al front. Front y back en servidores distintos. | Subdominios: obliga a configurar CORS y cualquier subdominio cuenta como "mismo sitio". Dominios distintos: la cookie `Lax` no viaja. |
+| Edición del panel | Bloqueo optimista entre solicitudes: el panel recibe la versión del local en un `ETag` y la devuelve en `If-Match` en toda escritura, obligatorio. | Bloqueo solo dentro de la transacción: un formulario viejo (la compu abierta desde hace rato mientras se editó desde el celular) pisaría los cambios sin aviso, sobre todo con el `PUT` de horarios que reemplaza la semana entera. |
 | Slug | Lo fija y lo cambia solo el owner por consola. 3 a 40 caracteres `a-z 0-9 -`, único, sin palabras reservadas (`api`, `panel`, `admin`…). Las reservadas se controlan al elegir el slug (alta y cambio), no al cargarlo: la lista puede crecer sin dejar locales existentes sin poder abrirse. | Que lo cambie el admin: rompería el link publicado en redes sin querer. |
 | Aislamiento | Toda escritura exige el local fijado en la transacción, sin excepción. Se leen sin local fijado solo `locales`, para resolver el slug, y `membresias`, para saber de qué local es el usuario de la sesión. | `locales` sin RLS: un descuido permitiría que un local escriba datos de otro. |
 | Concurrencia | Bloqueo optimista del `Local`: columna `version`; si otro lo guardó desde que se leyó, `409 local_modificado_en_paralelo` y se recarga. | Bloqueo pesimista (`FOR UPDATE`): una lectura especial por repositorio. Nada: una edición del panel podía revertir una suspensión hecha al mismo tiempo. |
@@ -202,6 +203,11 @@ El dominio no tiene ningún `if` que elija comportamiento: las variantes son cla
 **`franjas_horarias`** (RLS completo): `id`, `local_id`, `dia` (0 a 6), `apertura`, `cierre` (`time`). Reemplazar el horario borra y vuelve a insertar las franjas del local en la misma transacción que actualiza `locales`. La no superposición la garantiza el dominio; la base no la controla (ver Decisiones tomadas).
 
 **Guardar el `Local`** actualiza `locales` con `WHERE id = :id AND version = :version_leida` y suma uno a la versión. Si no actualizó exactamente una fila, lanza `LocalModificadoEnParalelo` (409) y no toca las franjas.
+
+**Versión esperada (1b):** la versión sigue fuera del agregado. Es un objeto de valor de la aplicación de Locales, `VersionDelLocal` (entero ≥ 0).
+- `obtener(esperada: VersionDelLocal | None = None)`: si recibe una versión y la fila tiene otra, lanza `LocalModificadoEnParalelo` sin cargar las franjas. El `UPDATE` sigue comparando contra la versión leída, así que también cubre una edición que se cruce después de la lectura.
+- Los casos de uso del panel que escriben reciben `esperada` y devuelven la versión nueva (el repositorio la expone después de `guardar`), para que la respuesta lleve el `ETag` actualizado y el front pueda seguir editando sin volver a pedir el local.
+- Los comandos de la consola no mandan versión: el owner actúa sobre lo último que hay.
 
 **`usuarios`** (plataforma, sin RLS): `id`, `email` (en minúsculas), `google_sub` UNIQUE NULL, `creado_en`. El email es único solo entre los usuarios pendientes (sin `sub`): es lo que identifica a alguien hasta su primer login. Después manda el `sub`, y el email queda como un dato para mostrar que puede repetirse entre usuarios vinculados (por ejemplo, un email viejo que nadie actualizó). Ningún flujo busca usuarios vinculados por email.
 
@@ -378,7 +384,14 @@ Los cuerpos de los endpoints del panel y de auth quedan pendientes (ver Pendient
 ### Panel
 
 - Todas las rutas cuelgan del router `/api/v1/panel`, que depende de `ObtenerSesionVigente` (ver Flujos de acceso).
-- **`ObtenerLocalDelPanel` devuelve una vista, no el agregado:** `PanelDisponible` (todo lo que el panel muestra, ya calculado) o `PanelSuspendido` (solo el aviso), igual que `ObtenerTienda`. La API se limita a traducirla. (Cambio sobre el código de la 1a, que hoy devuelve el `Local`.)
+- **`ObtenerLocalDelPanel` devuelve una vista, no el agregado:** `PanelDisponible` (todo lo que el panel muestra, ya calculado, y la versión) o `PanelSuspendido` (solo el aviso), igual que `ObtenerTienda`. La API se limita a traducirla. (Cambio sobre el código de la 1a, que hoy devuelve el `Local`.)
+- **`ETag` / `If-Match`:**
+  - `GET /panel/local` responde con `ETag: "<versión>"` (fuerte; es la versión del local, no un hash del cuerpo).
+  - Toda escritura del panel (`PATCH /panel/local`, `PUT /panel/local/horarios`, `POST /panel/local/cierre-manual`, las subidas de imágenes) exige `If-Match` con esa versión. Sin la cabecera: `428 version_requerida`. Con otra versión: `409 local_modificado_en_paralelo` (el mismo error que el bloqueo dentro de la transacción, así el front tiene un solo caso: "cambiaron el local, recargá").
+  - Toda escritura exitosa responde con el `ETag` nuevo.
+  - Una sola versión cubre todo el local: cambiar el logo invalida un formulario de horarios abierto. Es un 409 de más en un caso raro, y se acepta.
+  - En las subidas, `If-Match` se valida junto con la sesión, antes de leer el cuerpo.
+- **Cookie en los tests:** el cliente de la API usa `https://testserver`, porque `httpx` no guarda una cookie `Secure` sobre HTTP.
 
 ### Consola de la 1b
 
@@ -398,8 +411,9 @@ Mismas reglas de salida que la consola de la 1a.
   - el alta del admin es atómica: si falla la membresía, no queda el usuario;
   - el índice `uq_usuarios_email_pendiente`: dos pendientes con el mismo email chocan; un vinculado y un pendiente, no;
   - un admin no ve ni modifica nada de otro local, aunque mande otro id;
-  - el `UPDATE` del último uso no se pisa con dos requests simultáneas.
-- **API:** el login responde el mismo `403 usuario_no_habilitado` para un email desconocido y para uno que solo coincide con un usuario vinculado a otro `sub` (que no se pueda averiguar quién está dado de alta); un error de `google-auth` nunca da 500; una sesión vencida da 401 y borra la cookie; logout sin sesión da 204.
+  - el `UPDATE` del último uso no se pisa con dos requests simultáneas;
+  - `obtener` con una versión esperada distinta de la guardada lanza `LocalModificadoEnParalelo`.
+- **API:** el login responde el mismo `403 usuario_no_habilitado` para un email desconocido y para uno que solo coincide con un usuario vinculado a otro `sub` (que no se pueda averiguar quién está dado de alta); un error de `google-auth` nunca da 500; una sesión vencida da 401 y borra la cookie; logout sin sesión da 204; una escritura del panel sin `If-Match` da 428 y con una versión vieja da 409 (el caso de la compu y el celular); la respuesta de una escritura trae el `ETag` nuevo.
 
 ## Errores
 
@@ -408,6 +422,7 @@ Mismas reglas de salida que la consola de la 1a.
 | `slug_invalido`, `slug_reservado`, `whatsapp_invalido`, `zona_horaria_invalida`, `franja_ambigua`, `horarios_superpuestos`, `franja_corta_la_hora_de_corte`, `dato_del_local_invalido` | 422 (categoría `ReglaDeNegocioIncumplida`) |
 | `imagen_invalida`, `imagen_demasiado_grande` | 422 |
 | `slug_en_uso`, `local_modificado_en_paralelo`, `admin_ya_invitado` | 409 |
+| `version_requerida` | 428 |
 | `local_no_encontrado`, `imagen_no_encontrada` | 404 |
 | `token_invalido`, `sesion_requerida` (además borra la cookie) | 401 |
 | `servicio_de_google_no_disponible` | 503 |
@@ -417,9 +432,8 @@ Las categorías `NoAutenticado` (401) y `AccesoDenegado` (403) se suman en `comp
 
 ## Pendientes
 
-Resueltos el 2026-11-13 (ver Decisiones tomadas): restricción de exclusión (no va), regla del WhatsApp, próxima apertura y Sección 4 de la 1a. Resueltos el 2026-11-14 (revisión del diseño de la 1b): políticas de `membresias`, unidades de trabajo de Identidad, resolución de la sesión del panel, mecanismo del límite de subida y unicidad del email de `usuarios` (único solo entre pendientes; ver Login con Google), reparto de la sesión, `sesiones` y su purga, `Origin`, adaptador de Google, vista del panel, suspensión antes de procesar imágenes y pruebas de la 1b.
+Resueltos el 2026-11-13 (ver Decisiones tomadas): restricción de exclusión (no va), regla del WhatsApp, próxima apertura y Sección 4 de la 1a. Resueltos el 2026-11-14 (revisión del diseño de la 1b): políticas de `membresias`, unidades de trabajo de Identidad, resolución de la sesión del panel, mecanismo del límite de subida y unicidad del email de `usuarios` (único solo entre pendientes; ver Login con Google), reparto de la sesión, `sesiones` y su purga, `Origin`, adaptador de Google, vista del panel, suspensión antes de procesar imágenes, pruebas de la 1b, bloqueo entre solicitudes con `ETag`/`If-Match` obligatorio y cookie `__Host-` también en desarrollo (ver Decisiones tomadas).
 
 1. **`nonce` en el login con Google** (1b): fuera del MVP, queda como mejora.
 2. **Sección 4 de la 1b:** los cuerpos de los endpoints del panel y de auth (lo demás ya está en la Sección 4 de la 1b).
-   - **Bloqueo optimista entre solicitudes:** la versión no es parte del `Local`; el repositorio la recuerda dentro de la unidad de trabajo, así que hoy el bloqueo cubre ediciones concurrentes pero no un formulario viejo (el admin carga el panel, otro guarda, y el primero envía después). Si el panel lo necesita, `GET /panel/local` devuelve la versión (por ejemplo como `ETag`), el comando la manda en `If-Match`, el caso de uso la recibe y el repositorio compara contra ella; si no coincide, `409 local_modificado_en_paralelo`.
 3. **Plan de implementación** de la 1b. Su primera tarea: que `composicion.py` deje de importar `minutas.api.rutas_publicas` (hoy la raíz de composición depende de la capa HTTP), antes de que la 1b sume routers.
